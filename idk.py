@@ -7,12 +7,24 @@ import numpy as np
 import pandas as pd
 from cv2.typing import MatLike
 from matplotlib import pyplot as plt
+import argparse
+import re
 
-DATA_DIR = "data"
-OUTPUT_DIR = "out"
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--dapi", type=str, help="path to dapi")
+parser.add_argument("--data", type=str, help="path to data dir")
+parser.add_argument("--plot", type=bool, help="whether to plot")
+parser.add_argument("--out", type=str, help="path to output dir")
+
+args = parser.parse_args()
+
+DATA_DIR = args.data if args.data else "data"
+OUTPUT_DIR = args.out if args.out else "out"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-PLOT = True
+PLOT = True if args.plot else args.plot
+# PLOT = True
 
 
 def preprocess(gray: MatLike):
@@ -144,40 +156,51 @@ def build_histogram(channels: dict[str, MatLike], contours: list[MatLike], roi_n
 
 
 if __name__ == "__main__":
-    dapi_list = sorted(glob.glob("*DAPI*.tif", root_dir=DATA_DIR))
-    gfp_list = sorted(glob.glob("*GFP*.tif", root_dir=DATA_DIR))
-    tritc_list = sorted(glob.glob("*TRITC*.tif", root_dir=DATA_DIR))
-    print(f'Found {len(dapi_list)} DAPI, {len(gfp_list)} GFP, {len(tritc_list)} TRITC files')
-    # print(dapi_list, gfp_list, tritc_list)
+    dapi_path = args.dapi
 
-    for dapi_path, gfp_path, tritc_path in zip(dapi_list, gfp_list, tritc_list):
-        roi_name = dapi_path.split("_")[0]
+    pattern = re.compile(r"^(.*_)(\d)(_.*_Confocal )([A-Z]+)(_.*\.tif)$")
+    match = pattern.match(dapi_path)
+    
+    if match:
+        prefix = match.group(1)
+        middle = match.group(3)
+        suffix = match.group(5)
+        
+        gfp_path = f"{prefix}3{middle}GFP{suffix}"
+        tritc_path = f"{prefix}4{middle}TRITC{suffix}"
 
-        dapi = cv2.imread(os.path.join(DATA_DIR, dapi_path))
-        dapi_gray = cv2.cvtColor(dapi, cv2.COLOR_BGR2GRAY)
-        # print(dapi_gray.shape, dapi_gray.dtype)
+    else:
+        print(f"Error: The input path '{dapi_path}' does not match the expected pattern.")
+        quit()
 
-        gfp = cv2.imread(os.path.join(DATA_DIR, gfp_path))
-        gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
+    print(dapi_path, gfp_path, tritc_path)
+    roi_name = dapi_path.split("_")[0]
 
-        tritc = cv2.imread(os.path.join(DATA_DIR, tritc_path))
-        tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
+    dapi = cv2.imread(os.path.join(DATA_DIR, dapi_path))
+    dapi_gray = cv2.cvtColor(dapi, cv2.COLOR_BGR2GRAY)
+    # print(dapi_gray.shape, dapi_gray.dtype)
 
-        print(f"\nAnalysing: {roi_name}")
+    gfp = cv2.imread(os.path.join(DATA_DIR, gfp_path))
+    gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
 
-        print("Step 1: Preprocessing DAPI image...")
-        mask = preprocess(dapi_gray)
+    tritc = cv2.imread(os.path.join(DATA_DIR, tritc_path))
+    tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
 
-        print("Step 2: Finding contours...")
-        clusters = find_contours(dapi, gfp, tritc, mask, roi_name)
+    print(f"\nAnalysing: {roi_name}")
 
-        if clusters:
-            print("Step 3: Building GFP and TRITC histograms for clusters...")
-            channels = {"GFP": gfp_gray, "TRITC": tritc_gray}
-            build_histogram(channels, clusters, roi_name)
-        else:
-            print("Skipping histogram generation as no clusters met the criteria.")
+    print("Step 1: Preprocessing DAPI image...")
+    mask = preprocess(dapi_gray)
 
-        print('---------------------------------------')
+    print("Step 2: Finding contours...")
+    clusters = find_contours(dapi, gfp, tritc, mask, roi_name)
+
+    if clusters:
+        print("Step 3: Building GFP and TRITC histograms for clusters...")
+        channels = {"GFP": gfp_gray, "TRITC": tritc_gray}
+        build_histogram(channels, clusters, roi_name)
+    else:
+        print("Skipping histogram generation as no clusters met the criteria.")
+
+    print('---------------------------------------')
 
     print("\nDone :D")

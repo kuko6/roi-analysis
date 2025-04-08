@@ -27,6 +27,7 @@ gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
 
 tritc = cv2.imread(os.path.join(data_dir,tritc_list[image_index]))
 tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
+
 # %%
 plt.imshow(dapi_gray, cmap='gray')
 plt.axis('off')
@@ -102,9 +103,9 @@ channels = {"GFP": gfp_gray, "TRITC": tritc_gray}
 channel_histograms = {name: {} for name in channels.keys()}
 
 # iterate over each cluster
-for i, cluster in enumerate(contours):
+for i, cluster in enumerate(cluster_contours):
     # binary mask for the current cluster
-    cluster_map = np.zeros_like(next(iter(channels.values())), dtype=np.uint8)
+    cluster_map = np.zeros_like(channels['GFP'], dtype=np.uint8)
     cv2.drawContours(cluster_map, [cluster], 0, [255.0], thickness=cv2.FILLED)
 
     # boolean mask for pixel selection
@@ -120,7 +121,7 @@ for i, cluster in enumerate(contours):
             histogram_counts, _ = np.histogram(
                 pixels_inside_contour, bins=bin_edges
             )
-            column_name = f"Cluster_{i}"
+            column_name = f"Cluster_{i+1}"
             channel_histograms[channel_name][column_name] = histogram_counts
 
 # save the histogram data
