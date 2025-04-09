@@ -1,5 +1,4 @@
 import copy
-import glob
 import os
 
 import cv2
@@ -37,9 +36,12 @@ def preprocess(gray: MatLike):
 
     # apply morphological opening to remove small objects and noise
     # while preserving the shape of larger objects (cell clusters)
-    kernel = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(7, 7))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    kernel = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(11, 11))
     mask = cv2.dilate(mask, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+
+    plt.imshow(mask, cmap='gray')
+    plt.axis('off')
 
     return mask
 
@@ -63,7 +65,7 @@ def find_contours(dapi: MatLike, gfp: MatLike, tritc: MatLike, mask: MatLike, ro
     all_areas = [cv2.contourArea(c) for c in contours]
     # min_area_percentile = 98.0
     # contour_threshold = np.percentile(all_areas, min_area_percentile)
-    contour_threshold = 2000
+    contour_threshold = 3000
 
     # process each contour, filtering by area
     for i, contour in enumerate(contours):
@@ -77,12 +79,18 @@ def find_contours(dapi: MatLike, gfp: MatLike, tritc: MatLike, mask: MatLike, ro
             cv2.drawContours(target_img, contours, i, colour, 3)
             cv2.drawContours(target_img2, contours, i, colour, 3)
 
+            text = str(n+1)
+            print()
+            cv2.putText(segmented_img, text, tuple(contour[0][0]), cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 255), 10, cv2.LINE_AA)
+            cv2.putText(target_img, text, tuple(contour[0][0]), cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 255), 10, cv2.LINE_AA)
+            cv2.putText(target_img2, text, tuple(contour[0][0]), cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 255), 10, cv2.LINE_AA)
+
             n += 1
 
     print(f"  Found {n} clusters")
 
     if PLOT:
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(10, 20))
         fig.canvas.manager.set_window_title(roi_name)
         ax1.imshow(cv2.cvtColor(segmented_img, cv2.COLOR_BGR2RGB))
         ax1.set_title("DAPI")
@@ -144,8 +152,10 @@ def build_histogram(channels: dict[str, MatLike], contours: list[MatLike], roi_n
         final_df.insert(0, "Intensity", np.arange(num_bins))
 
         output_filename = os.path.join(OUTPUT_DIR, f"{roi_name}_{channel_name}.csv")
+        # output_filename = os.path.join(OUTPUT_DIR, f"{roi_name}_{channel_name}.xlsm")
         try:
             final_df.to_csv(output_filename, index=False)
+            # final_df.to_excel(output_filename)
             print(
                 f"  Successfully saved {channel_name} histogram data to {output_filename}"
             )
@@ -154,18 +164,17 @@ def build_histogram(channels: dict[str, MatLike], contours: list[MatLike], roi_n
                 f"  Error saving CSV file for {channel_name} to {output_filename}: {e}"
             )
 
-
 if __name__ == "__main__":
     dapi_path = args.dapi
 
     pattern = re.compile(r"^(.*_)(\d)(_.*_Confocal )([A-Z]+)(_.*\.tif)$")
     match = pattern.match(dapi_path)
-    
+
     if match:
         prefix = match.group(1)
         middle = match.group(3)
         suffix = match.group(5)
-        
+
         gfp_path = f"{prefix}3{middle}GFP{suffix}"
         tritc_path = f"{prefix}4{middle}TRITC{suffix}"
 
