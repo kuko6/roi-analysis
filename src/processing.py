@@ -9,6 +9,12 @@ from matplotlib import pyplot as plt
 
 
 class RoiAnalyser:
+    """
+    This class provides functionality for cell cluster segmentation, contour detection,
+    and histogram analysis of microscopy images, specifically DAPI, GFP,
+    and TRITC channels.
+    """
+
     def __init__(
         self,
         data_dir="data",
@@ -20,6 +26,19 @@ class RoiAnalyser:
         dilatation_kernel=7,
         dilatation_iter=2,
     ):
+        """
+        Initialize the RoiAnalyser with processing parameters.
+
+        Args:
+            data_dir (str, optional): Directory containing input images. Defaults to "data".
+            out_dir (str, optional): Directory where results will be saved. Defaults to "out".
+            plot (bool, optional): Whether to generate visualization plots. Defaults to True.
+            size_threshold (int, optional): Minimum size for clusters in pixels. Defaults to 3000.
+            opening_kernel (int, optional): Size of kernel for opening operations. Defaults to 13.
+            opening_iter (int, optional): Number of iterations for opening. Defaults to 1.
+            dilatation_kernel (int, optional): Size of kernel for dilation. Defaults to 7.
+            dilatation_iter (int, optional): Number of iterations for dilation. Defaults to 2.
+        """
         self.DATA_DIR = data_dir
         self.OUTPUT_DIR = out_dir
         self.PLOT = plot
@@ -168,7 +187,7 @@ class RoiAnalyser:
 
     def save_histogram(self, channel_histograms, figure):
         """
-        Saves computed histograms into csv files.
+        Saves computed histograms into csv files. Returns (gfp_df, tritc_df)
         """
 
         print(f"\nSaving histogram data for ROI: {self.ROI_NAME}")
@@ -178,6 +197,7 @@ class RoiAnalyser:
                 os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.Z}.png")
             )
 
+        out_files = {}
         for channel_name, ch_data in channel_histograms.items():
             data_dict = {}
             for z_level, z_data in ch_data.items():
@@ -192,6 +212,8 @@ class RoiAnalyser:
                     final_df, loc=0, column=("", "Pixel_values"), value=np.arange(256)
                 )
 
+                out_files[channel_name] = output_filename
+                # out_files.append(output_filename)
                 final_df.to_csv(output_filename, index=False)
                 print(
                     f"  Successfully saved {channel_name} histogram data to {output_filename}"
@@ -200,6 +222,8 @@ class RoiAnalyser:
                 print(
                     f"  Error saving CSV file for {channel_name} to {output_filename}: {e}"
                 )
+
+        return out_files
 
     def parse_dapi_path(self, dapi_path: str):
         """
@@ -326,3 +350,66 @@ class RoiAnalyser:
         )
 
         return clusters, channel_histograms, figure
+
+    def apopnec_ratio(self, file):
+        """
+        Runs some analysis idk.
+        """
+
+        df = pd.read_csv(file)
+        df = df.drop(index=0).reset_index(drop=True)
+
+        pattern = re.compile(r'^Z[2-6](?:\..+)?(_mult)?$')
+        columns_to_keep = ['Unnamed: 0'] + [col for col in df.columns if pattern.match(col)]
+
+        # Keep only those columns
+        df = df[columns_to_keep]
+
+        for col in df.columns[1:]:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df['Unnamed: 0'] = pd.to_numeric(df['Unnamed: 0'], errors='coerce')
+
+        # df_multiplied = df
+        z_columns = df.columns[1:]
+        column_sums = df[z_columns].sum()
+
+        df_multiplied = df.copy()
+        for col in z_columns:
+            df_multiplied[col + '_mult'] = df['Unnamed: 0'] * df[col]
+
+        # Define the row index to start summing from (72 onwards)
+        start_row = 72
+
+        # Select Z columns to sum
+        z_columns_mult = [col + '_mult' for col in z_columns]
+
+        # Sum each column from row 72 onward
+        column_sums_from_72 = df_multiplied.loc[start_row:, z_columns_mult].sum()
+
+        # Display the result
+        print(column_sums_from_72)
+
+        # Sum original columns
+        column_sums = df[z_columns].sum()
+
+        # Sum multiplied columns from row 72 downward
+        column_sums_from_72 = df_multiplied.loc[72:, [col + '_mult' for col in z_columns]].sum()
+
+        # Align the indices by renaming the multiplied columns to match the originals
+        column_sums_from_72.index = [col.replace('_mult', '') for col in column_sums_from_72.index]
+
+        # Now perform the division
+        column_ratios = column_sums_from_72 / column_sums
+
+        # Add the column sums as a new row at the bottom of the DataFrame
+        df_multiplied.loc['Column Sums'] = column_sums
+
+        # Add the column_sums_from_72 as a new row at the bottom of the DataFrame
+        df_multiplied.loc['Column Sums from 72 onward'] = column_sums_from_72
+
+        # Add the column_ratios as a new row at the bottom of the DataFrame
+        df_multiplied.loc['Column Ratios'] = column_ratios
+
+        df_multiplied.to_csv(file, index=True)
+        print(f' Saved as {file}')
+        # return df_multiplied
