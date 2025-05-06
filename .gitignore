@@ -2,6 +2,7 @@
 
 data/
 out/
+playground/
 
 # Python-generated files
 __pycache__/

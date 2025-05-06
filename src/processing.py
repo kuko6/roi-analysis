@@ -17,7 +17,7 @@ class RoiAnalyser:
 
     def __init__(
         self,
-        data_dir="data",
+        data_dir,
         out_dir="out",
         plot=True,
         size_threshold=3000,
@@ -30,7 +30,7 @@ class RoiAnalyser:
         Initialize the RoiAnalyser with processing parameters.
 
         Args:
-            data_dir (str, optional): Directory containing input images. Defaults to "data".
+            data_dir (str, optional): Directory containing input images.
             out_dir (str, optional): Directory where results will be saved. Defaults to "out".
             plot (bool, optional): Whether to generate visualization plots. Defaults to True.
             size_threshold (int, optional): Minimum size for clusters in pixels. Defaults to 3000.
@@ -351,7 +351,7 @@ class RoiAnalyser:
 
         return clusters, channel_histograms, figure
 
-    def apopnec_ratio(self, file):
+    def apopnec_ratio(self, file, start_row: int):
         """
         Runs some analysis idk.
         """
@@ -377,35 +377,32 @@ class RoiAnalyser:
         for col in z_columns:
             df_multiplied[col + '_mult'] = df['Unnamed: 0'] * df[col]
 
-        # Define the row index to start summing from (72 onwards)
-        start_row = 72
-
         # Select Z columns to sum
         z_columns_mult = [col + '_mult' for col in z_columns]
 
-        # Sum each column from row 72 onward
-        column_sums_from_72 = df_multiplied.loc[start_row:, z_columns_mult].sum()
+        # Sum each column from row `start_row` onward
+        column_sums_from_start_row = df_multiplied.loc[start_row:, z_columns_mult].sum()
 
         # Display the result
-        print(column_sums_from_72)
+        print(column_sums_from_start_row)
 
         # Sum original columns
         column_sums = df[z_columns].sum()
 
-        # Sum multiplied columns from row 72 downward
-        column_sums_from_72 = df_multiplied.loc[72:, [col + '_mult' for col in z_columns]].sum()
+        # Sum multiplied columns from row `start_row` downward
+        column_sums_from_start_row = df_multiplied.loc[start_row:, [col + '_mult' for col in z_columns]].sum()
 
         # Align the indices by renaming the multiplied columns to match the originals
-        column_sums_from_72.index = [col.replace('_mult', '') for col in column_sums_from_72.index]
+        column_sums_from_start_row.index = [col.replace('_mult', '') for col in column_sums_from_start_row.index]
 
         # Now perform the division
-        column_ratios = column_sums_from_72 / column_sums
+        column_ratios = column_sums_from_start_row / column_sums
 
         # Add the column sums as a new row at the bottom of the DataFrame
         df_multiplied.loc['Column Sums'] = column_sums
 
-        # Add the column_sums_from_72 as a new row at the bottom of the DataFrame
-        df_multiplied.loc['Column Sums from 72 onward'] = column_sums_from_72
+        # Add the column_sums_from_start_row as a new row at the bottom of the DataFrame
+        df_multiplied.loc[f'Column Sums from {start_row} onward'] = column_sums_from_start_row
 
         # Add the column_ratios as a new row at the bottom of the DataFrame
         df_multiplied.loc['Column Ratios'] = column_ratios
