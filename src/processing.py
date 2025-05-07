@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from cv2.typing import MatLike
 from matplotlib import pyplot as plt
+from matplotlib.figure import Figure
 
 
 class RoiAnalyser:
@@ -17,7 +18,7 @@ class RoiAnalyser:
 
     def __init__(
         self,
-        data_dir,
+        data_dir: str,
         out_dir="out",
         plot=True,
         size_threshold=3000,
@@ -30,7 +31,7 @@ class RoiAnalyser:
         Initialize the RoiAnalyser with processing parameters.
 
         Args:
-            data_dir (str, optional): Directory containing input images.
+            data_dir (str): Directory containing input images.
             out_dir (str, optional): Directory where results will be saved. Defaults to "out".
             plot (bool, optional): Whether to generate visualization plots. Defaults to True.
             size_threshold (int, optional): Minimum size for clusters in pixels. Defaults to 3000.
@@ -39,6 +40,7 @@ class RoiAnalyser:
             dilatation_kernel (int, optional): Size of kernel for dilation. Defaults to 7.
             dilatation_iter (int, optional): Number of iterations for dilation. Defaults to 2.
         """
+
         self.DATA_DIR = data_dir
         self.OUTPUT_DIR = out_dir
         self.PLOT = plot
@@ -54,10 +56,11 @@ class RoiAnalyser:
 
         os.makedirs(out_dir, exist_ok=True)
 
-    def create_binary_mask(self, gray: MatLike):
+    def create_binary_mask(self, gray: MatLike) -> MatLike:
         """
         Preprocesses a grayscale image to create a binary mask for cell segmentation.
         """
+
         # apply Otsu's thresholding
         _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU)
 
@@ -82,7 +85,7 @@ class RoiAnalyser:
 
         return mask
 
-    def define_clusters(self, mask: MatLike):
+    def define_clusters(self, mask: MatLike) -> list[MatLike]:
         """
         Identifies and visualizes clusters by finding contours in the mask image.
         """
@@ -103,7 +106,7 @@ class RoiAnalyser:
 
     def plot_contours(
         self, dapi: MatLike, gfp: MatLike, tritc: MatLike, contours: list[MatLike]
-    ):
+    ) -> Figure:
         """
         Plots found contours on all 3 images.
         """
@@ -147,7 +150,7 @@ class RoiAnalyser:
         contours: list[MatLike],
         z: str,
         channel_histograms: dict,
-    ):
+    ) -> dict:
         """
         Calculates pixel intensity histograms for each cluster.
         """
@@ -185,9 +188,10 @@ class RoiAnalyser:
 
         return channel_histograms
 
-    def save_histogram(self, channel_histograms, figure):
+    def save_histogram(self, channel_histograms: dict, figure: Figure = None) -> dict:
         """
-        Saves computed histograms into csv files. Returns (gfp_df, tritc_df)
+        Saves computed histograms and *optionaly* figures.
+        Returns dict with histograms mapped to channels.
         """
 
         print(f"\nSaving histogram data for ROI: {self.ROI_NAME}")
@@ -197,7 +201,7 @@ class RoiAnalyser:
                 os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.Z}.png")
             )
 
-        out_files = {}
+        out_dict = {}
         for channel_name, ch_data in channel_histograms.items():
             data_dict = {}
             for z_level, z_data in ch_data.items():
@@ -212,7 +216,7 @@ class RoiAnalyser:
                     final_df, loc=0, column=("", "Pixel_values"), value=np.arange(256)
                 )
 
-                out_files[channel_name] = output_filename
+                out_dict[channel_name] = output_filename
                 # out_files.append(output_filename)
                 final_df.to_csv(output_filename, index=False)
                 print(
@@ -223,9 +227,9 @@ class RoiAnalyser:
                     f"  Error saving CSV file for {channel_name} to {output_filename}: {e}"
                 )
 
-        return out_files
+        return out_dict
 
-    def parse_dapi_path(self, dapi_path: str):
+    def parse_dapi_path(self, dapi_path: str) -> tuple[str, str]:
         """
         Parse DAPI image path and return coresponding gfp and tritc paths.
         """
@@ -254,7 +258,7 @@ class RoiAnalyser:
 
         return gfp_path, tritc_path
 
-    def load_data(self, dapi_path: str, gfp_path: str, tritc_path: str):
+    def load_data(self, dapi_path: str, gfp_path: str, tritc_path: str) -> dict[str, dict[str, MatLike]]:
         """
         Load data from the given paths and return a dictionary of images and their grayscale versions.
         """
@@ -278,8 +282,8 @@ class RoiAnalyser:
         return imgs
 
     def repeat_for_additional_images(
-        self, z: str, dapi_path: str, clusters: list[MatLike], channel_histograms
-    ):
+        self, z: str, dapi_path: str, clusters: list[MatLike], channel_histograms: dict
+    ) -> dict:
         """
         Repeat the analysis for additional images.
         """
@@ -319,7 +323,7 @@ class RoiAnalyser:
 
         return channel_histograms
 
-    def run_analysis(self, dapi_path: str):
+    def run_analysis(self, dapi_path: str) -> tuple[list[MatLike], dict, Figure | None]:
         """
         Runs analysis for the first image group (DAPI, GFP and TRITC).
         """
@@ -351,7 +355,7 @@ class RoiAnalyser:
 
         return clusters, channel_histograms, figure
 
-    def apopnec_ratio(self, file, start_row: int):
+    def apopnec_ratio(self, file: str, start_row: int):
         """
         Runs some analysis idk.
         """
@@ -359,15 +363,17 @@ class RoiAnalyser:
         df = pd.read_csv(file)
         df = df.drop(index=0).reset_index(drop=True)
 
-        pattern = re.compile(r'^Z[2-6](?:\..+)?(_mult)?$')
-        columns_to_keep = ['Unnamed: 0'] + [col for col in df.columns if pattern.match(col)]
+        pattern = re.compile(r"^Z[2-6](?:\..+)?(_mult)?$")
+        columns_to_keep = ["Unnamed: 0"] + [
+            col for col in df.columns if pattern.match(col)
+        ]
 
         # Keep only those columns
         df = df[columns_to_keep]
 
         for col in df.columns[1:]:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        df['Unnamed: 0'] = pd.to_numeric(df['Unnamed: 0'], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df["Unnamed: 0"] = pd.to_numeric(df["Unnamed: 0"], errors="coerce")
 
         # df_multiplied = df
         z_columns = df.columns[1:]
@@ -375,10 +381,10 @@ class RoiAnalyser:
 
         df_multiplied = df.copy()
         for col in z_columns:
-            df_multiplied[col + '_mult'] = df['Unnamed: 0'] * df[col]
+            df_multiplied[col + "_mult"] = df["Unnamed: 0"] * df[col]
 
         # Select Z columns to sum
-        z_columns_mult = [col + '_mult' for col in z_columns]
+        z_columns_mult = [col + "_mult" for col in z_columns]
 
         # Sum each column from row `start_row` onward
         column_sums_from_start_row = df_multiplied.loc[start_row:, z_columns_mult].sum()
@@ -390,23 +396,29 @@ class RoiAnalyser:
         column_sums = df[z_columns].sum()
 
         # Sum multiplied columns from row `start_row` downward
-        column_sums_from_start_row = df_multiplied.loc[start_row:, [col + '_mult' for col in z_columns]].sum()
+        column_sums_from_start_row = df_multiplied.loc[
+            start_row:, [col + "_mult" for col in z_columns]
+        ].sum()
 
         # Align the indices by renaming the multiplied columns to match the originals
-        column_sums_from_start_row.index = [col.replace('_mult', '') for col in column_sums_from_start_row.index]
+        column_sums_from_start_row.index = [
+            col.replace("_mult", "") for col in column_sums_from_start_row.index
+        ]
 
         # Now perform the division
         column_ratios = column_sums_from_start_row / column_sums
 
         # Add the column sums as a new row at the bottom of the DataFrame
-        df_multiplied.loc['Column Sums'] = column_sums
+        df_multiplied.loc["Column Sums"] = column_sums
 
         # Add the column_sums_from_start_row as a new row at the bottom of the DataFrame
-        df_multiplied.loc[f'Column Sums from {start_row} onward'] = column_sums_from_start_row
+        df_multiplied.loc[f"Column Sums from {start_row} onward"] = (
+            column_sums_from_start_row
+        )
 
         # Add the column_ratios as a new row at the bottom of the DataFrame
-        df_multiplied.loc['Column Ratios'] = column_ratios
+        df_multiplied.loc["Column Ratios"] = column_ratios
 
         df_multiplied.to_csv(file, index=True)
-        print(f' Saved as {file}')
+        print(f" Saved as {file}")
         # return df_multiplied
