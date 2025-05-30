@@ -19,6 +19,7 @@ class RoiAnalyser:
     def __init__(
         self,
         data_dir: str,
+        roi_name: str,
         out_dir="out",
         plot=True,
         size_threshold=3000,
@@ -51,8 +52,9 @@ class RoiAnalyser:
         self.DILATATION_KERNEL = dilatation_kernel
         self.SIZE_THRESHOLD = size_threshold
 
-        self.Z = ""
-        self.ROI_NAME = ""
+        self.ROI_NAME = roi_name
+        self.MODALITIES = ("dapi", "tritc", "gfp")
+        self.z = ""
 
         os.makedirs(out_dir, exist_ok=True)
 
@@ -147,8 +149,7 @@ class RoiAnalyser:
     def build_histogram(
         self,
         channels: dict[str, MatLike],
-        contours: list[MatLike],
-        z: str,
+        clusters: list[MatLike],
         channel_histograms: dict,
     ) -> dict:
         """
@@ -161,11 +162,10 @@ class RoiAnalyser:
         # nested dictionary that stores histogram data for each channel
         # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}}}}
         for name in channel_histograms.keys():
-            channel_histograms[name][z] = {}
-        # print(channel_histograms)
+            channel_histograms[name][self.z] = {}
 
         # iterate over each cluster
-        for i, cluster in enumerate(contours):
+        for i, cluster in enumerate(clusters):
             # binary mask for the current cluster
             cluster_map = np.zeros_like(channels["GFP"], dtype=np.uint8)
             cv2.drawContours(cluster_map, [cluster], 0, [255.0], thickness=cv2.FILLED)
@@ -184,7 +184,9 @@ class RoiAnalyser:
                         pixels_inside_contour, bins=bin_edges
                     )
                     column_name = f"Cluster_{i + 1}"
-                    channel_histograms[channel_name][z][column_name] = histogram_counts
+                    channel_histograms[channel_name][self.z][column_name] = (
+                        histogram_counts
+                    )
 
         return channel_histograms
 
@@ -198,7 +200,7 @@ class RoiAnalyser:
 
         if figure:
             figure.savefig(
-                os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.Z}.png")
+                os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.z}.png")
             )
 
         out_dict = {}
@@ -210,178 +212,87 @@ class RoiAnalyser:
             output_filename = os.path.join(
                 self.OUTPUT_DIR, f"{self.ROI_NAME}_{channel_name}.csv"
             )
-            try:
-                final_df = pd.concat(data_dict, axis=1)
-                pd.DataFrame.insert(
-                    final_df, loc=0, column=("", "Pixel_values"), value=np.arange(256)
-                )
 
-                out_dict[channel_name] = output_filename
-                # out_files.append(output_filename)
-                final_df.to_csv(output_filename, index=False)
-                print(
-                    f"  Successfully saved {channel_name} histogram data to {output_filename}"
-                )
-            except Exception as e:
-                print(
-                    f"  Error saving CSV file for {channel_name} to {output_filename}: {e}"
-                )
+            final_df = pd.concat(data_dict, axis=1)
+            pd.DataFrame.insert(
+                final_df, loc=0, column=("", "Pixel values"), value=np.arange(256)
+            )
+
+            out_dict[channel_name] = output_filename
+            # out_files.append(output_filename)
+            final_df.to_csv(output_filename, index=False)
+            print(
+                f"  Successfully saved {channel_name} histogram data to {output_filename}"
+            )
 
         return out_dict
-
-    def parse_dapi_path(self, dapi_path: str) -> tuple[str, str]:
-        """
-        Parse DAPI image path and return coresponding gfp and tritc paths.
-        """
-
-        pattern = re.compile(r"^(.*_)(\d)(_\d(.*)_Confocal )([A-Z]+)(_.*\.tif)$")
-        match = pattern.match(dapi_path)
-        if match is None:
-            raise ValueError(
-                f"Error: The input path '{dapi_path}' does not match the expected pattern."
-            )
-
-        prefix = match.group(1)
-        middle = match.group(3)
-        z = match.group(4)
-        suffix = match.group(6)
-        # print(prefix, middle, z, suffix)
-
-        gfp_path = f"{prefix}3{middle}GFP{suffix}"
-        tritc_path = f"{prefix}4{middle}TRITC{suffix}"
-
-        print(dapi_path, gfp_path, tritc_path)
-        roi_name = prefix.split("_")[0]
-
-        self.ROI_NAME = roi_name
-        self.Z = z
-
-        return gfp_path, tritc_path
-
-    def load_data(self, dapi_path: str, gfp_path: str, tritc_path: str) -> dict[str, dict[str, MatLike]]:
-        """
-        Load data from the given paths and return a dictionary of images and their grayscale versions.
-        """
-
-        dapi = cv2.imread(os.path.join(self.DATA_DIR, dapi_path))
-        dapi_gray = cv2.cvtColor(dapi, cv2.COLOR_BGR2GRAY)
-        # print(dapi_gray.shape, dapi_gray.dtype)
-
-        gfp = cv2.imread(os.path.join(self.DATA_DIR, gfp_path))
-        gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
-
-        tritc = cv2.imread(os.path.join(self.DATA_DIR, tritc_path))
-        tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
-
-        imgs = {
-            "dapi": {"img": dapi, "gray": dapi_gray},
-            "gfp": {"img": gfp, "gray": gfp_gray},
-            "tritc": {"img": tritc, "gray": tritc_gray},
-        }
-
-        return imgs
-
-    def repeat_for_additional_images(
-        self, z: str, dapi_path: str, clusters: list[MatLike], channel_histograms: dict
-    ) -> dict:
-        """
-        Repeat the analysis for additional images.
-        """
-
-        print("Repeating for: ", z)
-
-        pattern = re.compile(r"^(.*_)(\d)(_\d(.*)_Confocal )([A-Z]+)(_.*\.tif)$")
-        match = pattern.match(dapi_path)
-        if match is None:
-            raise ValueError(
-                f"Error: The input path '{dapi_path}' does not match the expected pattern."
-            )
-
-        prefix = match.group(1)
-        suffix = match.group(6)
-
-        dapi_path = f"{prefix}2_1{z}_Confocal DAPI{suffix}"
-        gfp_path = f"{prefix}3_1{z}_Confocal GFP{suffix}"
-        tritc_path = f"{prefix}4_1{z}_Confocal TRITC{suffix}"
-        print(dapi_path, gfp_path, tritc_path)
-
-        dapi = cv2.imread(os.path.join(self.DATA_DIR, dapi_path))
-
-        gfp = cv2.imread(os.path.join(self.DATA_DIR, gfp_path))
-        gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
-
-        tritc = cv2.imread(os.path.join(self.DATA_DIR, tritc_path))
-        tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
-
-        if self.PLOT:
-            self.plot_contours(dapi, gfp, tritc, clusters)
-
-        channels = {"GFP": gfp_gray, "TRITC": tritc_gray}
-        channel_histograms = self.build_histogram(
-            channels, clusters, z, channel_histograms
-        )
-
-        return channel_histograms
-
-    def run_analysis(self, dapi_path: str) -> tuple[list[MatLike], dict, Figure | None]:
-        """
-        Runs analysis for the first image group (DAPI, GFP and TRITC).
-        """
-
-        gfp_path, tritc_path = self.parse_dapi_path(dapi_path)
-        imgs = self.load_data(dapi_path, gfp_path, tritc_path)
-
-        print(f"\nAnalysing: {self.ROI_NAME}, {self.Z}")
-
-        print("Step 1: Preprocessing DAPI image...")
-        mask = self.create_binary_mask(imgs["dapi"]["gray"])
-
-        print("Step 2: Finding contours...")
-        clusters = self.define_clusters(mask)
-
-        figure = None
-        if self.PLOT:
-            figure = self.plot_contours(
-                imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
-            )
-
-        print("Step 3: Building GFP and TRITC histograms for clusters...")
-        channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
-        channel_histograms = {"GFP": {}, "TRITC": {}}
-
-        channel_histograms = self.build_histogram(
-            channels, clusters, self.Z, channel_histograms
-        )
-
-        return clusters, channel_histograms, figure
 
     def apopnec_ratio(self, file: str, start_row: int):
         """
         Runs some analysis idk.
         """
+        
+        # df = pd.read_csv(file)
+        df = pd.read_csv(file, header=[0,1])
+        print(df.head())
 
-        df = pd.read_csv(file)
-        df = df.drop(index=0).reset_index(drop=True)
+        # df = df.drop(index=0).reset_index(drop=True)
+        # df.rename(columns={'Unnamed: 0': 'Pixel values'}, inplace=True)
+        # print(df)
 
-        pattern = re.compile(r"^Z[2-6](?:\..+)?(_mult)?$")
-        columns_to_keep = ["Unnamed: 0"] + [
-            col for col in df.columns if pattern.match(col)
-        ]
+        # pattern = re.compile(r"^Z[2-6](?:\..+)?$")
+        # columns_to_keep = ["Pixel values"] + [
+        #     col for col in df.columns if pattern.match(col)
+        # ]
 
         # Keep only those columns
-        df = df[columns_to_keep]
+        # df = df[columns_to_keep]
 
-        for col in df.columns[1:]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        df["Unnamed: 0"] = pd.to_numeric(df["Unnamed: 0"], errors="coerce")
+        df = df.apply(pd.to_numeric, errors="coerce")
 
-        # df_multiplied = df
-        z_columns = df.columns[1:]
+        z_columns = df.columns
         column_sums = df[z_columns].sum()
-
+        
+        # 4. Multiply each column by the index ("Pixel values")
         df_multiplied = df.copy()
-        for col in z_columns:
-            df_multiplied[col + "_mult"] = df["Unnamed: 0"] * df[col]
+        for z_col in z_columns:
+            new_col = (z_col[0], z_col[1] + "_mult")  # Add suffix to second level
+            df_multiplied[new_col] = df[z_col] * df.index
+
+        # Get multiplied columns
+        z_columns_mult = [(z[0], z[1] + "_mult") for z in z_columns]
+
+        # Sum original and multiplied from start_row onward
+        column_sums = df[z_columns].sum()
+        column_sums_from_start_row = df_multiplied.loc[start_row:, z_columns_mult].sum()
+
+        # Rename the multiplied sum index to match the originals (remove "_mult")
+        column_sums_from_start_row.index = pd.MultiIndex.from_tuples([
+            (z[0], z[1].replace("_mult", "")) for z in column_sums_from_start_row.index
+        ])
+
+        # Align indices to perform division
+        column_ratios = column_sums_from_start_row / column_sums
+
+        # Step 2: Append the empty row first
+        empty_row = pd.Series({col: pd.NA for col in df_multiplied.columns}, name="")
+        df_multiplied = pd.concat([df_multiplied, pd.DataFrame([empty_row])])
+
+        # --- Add summary rows to the DataFrame ---
+        df_multiplied.loc["Column Sums"] = pd.Series(column_sums)
+        df_multiplied.loc[f"Column Sums from {start_row} onward"] = pd.Series(column_sums_from_start_row)
+        df_multiplied.loc["Column Ratios"] = pd.Series(column_ratios)
+
+        # --- Save to file ---
+        output_file = f"{file.split('.')[0]}_analysis_new.csv"
+        df_multiplied.to_csv(output_file)
+        print(f"Saved as {output_file}")
+
+        return
+        
+        # df_multiplied = df.copy()
+        # for col in z_columns:
+        #     df_multiplied[col + "_mult"] = df["Pixel values"] * df[col]
 
         # Select Z columns to sum
         z_columns_mult = [col + "_mult" for col in z_columns]
@@ -419,6 +330,157 @@ class RoiAnalyser:
         # Add the column_ratios as a new row at the bottom of the DataFrame
         df_multiplied.loc["Column Ratios"] = column_ratios
 
-        df_multiplied.to_csv(file, index=True)
+        # df_multiplied.to_csv(file, index=True)
+        df_multiplied.to_csv(f"{file.split(".")[0]}_analysis.csv")
         print(f" Saved as {file}")
+
         # return df_multiplied
+
+    def get_file_paths(self) -> dict[str, str]:
+        """ """
+
+        file_names = os.listdir(self.DATA_DIR)
+        file_paths = {modality: "" for modality in self.MODALITIES}
+
+        # pattern = re.compile(
+        #     rf"(?P<roi>{re.escape(self.ROI_NAME)})[-_\d]*.*?(?P<z>{re.escape(self.z)}).*?\b(?P<modality>DAPI|GFP|TRITC)"
+        # )
+
+        for file_name in file_names:
+            if self.ROI_NAME in file_name and self.z in file_name:
+                for modality in file_paths.keys():
+                    if modality.upper() in file_name:
+                        file_paths[modality] = file_name
+
+        return file_paths
+
+    def load_data(
+        self, dapi_path: str, gfp_path: str, tritc_path: str
+    ) -> dict[str, dict[str, MatLike]]:
+        """
+        Load data from the given paths and return a dictionary of images and their grayscale versions.
+        """
+
+        dapi = cv2.imread(os.path.join(self.DATA_DIR, dapi_path))
+        dapi_gray = cv2.cvtColor(dapi, cv2.COLOR_BGR2GRAY)
+        # print(dapi_gray.shape, dapi_gray.dtype)
+
+        gfp = cv2.imread(os.path.join(self.DATA_DIR, gfp_path))
+        gfp_gray = cv2.cvtColor(gfp, cv2.COLOR_BGR2GRAY)
+
+        tritc = cv2.imread(os.path.join(self.DATA_DIR, tritc_path))
+        tritc_gray = cv2.cvtColor(tritc, cv2.COLOR_BGR2GRAY)
+
+        imgs = {
+            "dapi": {"img": dapi, "gray": dapi_gray},
+            "gfp": {"img": gfp, "gray": gfp_gray},
+            "tritc": {"img": tritc, "gray": tritc_gray},
+        }
+
+        return imgs
+
+    def repeat_for_additional_images(
+        self, z: str, clusters: list[MatLike], channel_histograms: dict
+    ) -> dict:
+        """
+        Repeat the analysis for additional images.
+        """
+
+        print(" Repeating for: ", z)
+
+        self.z = z
+        file_paths = self.get_file_paths()
+        imgs = self.load_data(
+            dapi_path=file_paths["dapi"],
+            gfp_path=file_paths["gfp"],
+            tritc_path=file_paths["tritc"],
+        )
+
+        if self.PLOT:
+            self.plot_contours(
+                imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
+            )
+
+        channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
+        channel_histograms = self.build_histogram(
+            channels, clusters, channel_histograms
+        )
+
+        return channel_histograms
+
+    def run_analysis(self, z="") -> tuple[list[MatLike], dict, Figure | None]:
+        """
+        Runs analysis for the first image group (DAPI, GFP and TRITC).
+        """
+
+        self.z = z
+        file_paths = self.get_file_paths()
+        imgs = self.load_data(
+            dapi_path=file_paths["dapi"],
+            gfp_path=file_paths["gfp"],
+            tritc_path=file_paths["tritc"],
+        )
+
+        print(f"\nAnalysing: {self.ROI_NAME}, {self.z}")
+
+        print("Step 1: Preprocessing DAPI image...")
+        mask = self.create_binary_mask(imgs["dapi"]["gray"])
+
+        print("Step 2: Finding contours...")
+        clusters = self.define_clusters(mask)
+
+        figure = None
+        if self.PLOT:
+            figure = self.plot_contours(
+                imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
+            )
+
+        print("Step 3: Building GFP and TRITC histograms for clusters...")
+        channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
+        channel_histograms = {"GFP": {}, "TRITC": {}}
+
+        channel_histograms = self.build_histogram(
+            channels, clusters, channel_histograms
+        )
+
+        return clusters, channel_histograms, figure
+
+
+if __name__ == "__main__":
+    DATA_DIR = "data"  # input data directory path
+    OUTPUT_DIR = "out"  # output results directory path
+    PLOT = False  # whether to show plots
+    SIZE_THRESHOLD = 3000  # size threshold for filtering clusters
+
+    roi_name = "A1ROI1"
+    analyser = RoiAnalyser(DATA_DIR, roi_name, OUTPUT_DIR, PLOT, SIZE_THRESHOLD)
+
+    # For dapi
+    # dapi_path = "A1ROI1_02_2_1Z4_Confocal DAPI_001.tif"  # change me
+    clusters, channel_histograms, figure = analyser.run_analysis(z="Z6")
+
+    # For other Zs
+    z = "Z4"  # change me
+    print("Step 4: Repeat for additional Zs...")
+    channels = analyser.repeat_for_additional_images(z, clusters, channel_histograms)
+
+    # Saving and exporting
+    # save histograms
+    print("Step 5: Saving histograms...")
+    out_files = analyser.save_histogram(channel_histograms, figure)
+    print(out_files)
+
+    # change these
+    params = {
+        "GFP": {"file": out_files["GFP"], "start_row": 72},
+        "TRITC": {"file": out_files["TRITC"], "start_row": 72},
+    }
+
+    # Doing some analysis
+    print("Step 6: Calculate apopnec ratio")
+    for name, args in params.items():
+        analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
+        print(f"|Done with {name}|\n")
+
+    print("------------------")
+    print("Done :)")
