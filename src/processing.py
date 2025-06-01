@@ -43,7 +43,7 @@ class RoiAnalyser:
         """
 
         self.DATA_DIR = data_dir
-        self.OUTPUT_DIR = out_dir
+        self.OUTPUT_DIR = os.path.join(out_dir, roi_name)
         self.PLOT = plot
 
         self.OPENING_KERNEL = opening_kernel
@@ -56,7 +56,7 @@ class RoiAnalyser:
         self.MODALITIES = ("dapi", "tritc", "gfp")
         self.z = ""
 
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
     def create_binary_mask(self, gray: MatLike) -> MatLike:
         """
@@ -123,7 +123,17 @@ class RoiAnalyser:
             colour = (0, 255, 255)
             font = cv2.FONT_HERSHEY_SIMPLEX
             text = str(i + 1)
-            coords = tuple(contour[0][0])
+            coords = list(contour[0][0])
+            if coords[0] == 0:
+                coords[0] += 100
+            elif coords[0] >= dapi.shape[0] - 1:
+                coords[0] -= 100
+            
+            if coords[1] == 0:
+                coords[1] += 100
+            elif coords[1] >= dapi.shape[1] - 1:
+                coords[1] -= 100
+
             cv2.putText(dapi, text, coords, font, 5, colour, 10, cv2.LINE_AA)
             cv2.putText(gfp, text, coords, font, 5, colour, 10, cv2.LINE_AA)
             cv2.putText(tritc, text, coords, font, 5, colour, 10, cv2.LINE_AA)
@@ -142,8 +152,16 @@ class RoiAnalyser:
         ax3.axis("off")
 
         plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
-        plt.show()
 
+        if self.PLOT:
+            plt.show()
+        else:
+            plt.close()
+
+        if self.z == "":
+            fig.savefig(os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}.png"))
+        else:
+            fig.savefig(os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.z}.png"))
         return fig
 
     def build_histogram(
@@ -161,8 +179,10 @@ class RoiAnalyser:
 
         # nested dictionary that stores histogram data for each channel
         # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}}}}
+        
+        z = self.z if self.z != "" else "Default"
         for name in channel_histograms.keys():
-            channel_histograms[name][self.z] = {}
+            channel_histograms[name][z] = {}
 
         # iterate over each cluster
         for i, cluster in enumerate(clusters):
@@ -183,25 +203,20 @@ class RoiAnalyser:
                     histogram_counts, _ = np.histogram(
                         pixels_inside_contour, bins=bin_edges
                     )
-                    column_name = f"Cluster_{i + 1}"
-                    channel_histograms[channel_name][self.z][column_name] = (
+                    column_name = f"Cluster {i + 1}"
+                    channel_histograms[channel_name][z][column_name] = (
                         histogram_counts
                     )
 
         return channel_histograms
 
-    def save_histogram(self, channel_histograms: dict, figure: Figure = None) -> dict:
+    def save_histogram(self, channel_histograms: dict) -> dict:
         """
         Saves computed histograms and *optionaly* figures.
         Returns dict with histograms mapped to channels.
         """
 
         print(f"\nSaving histogram data for ROI: {self.ROI_NAME}")
-
-        if figure:
-            figure.savefig(
-                os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.z}.png")
-            )
 
         out_dict = {}
         for channel_name, ch_data in channel_histograms.items():
@@ -231,28 +246,17 @@ class RoiAnalyser:
         """
         Runs some analysis idk.
         """
-        
-        # df = pd.read_csv(file)
-        df = pd.read_csv(file, header=[0,1])
-        print(df.head())
 
-        # df = df.drop(index=0).reset_index(drop=True)
-        # df.rename(columns={'Unnamed: 0': 'Pixel values'}, inplace=True)
-        # print(df)
-
-        # pattern = re.compile(r"^Z[2-6](?:\..+)?$")
-        # columns_to_keep = ["Pixel values"] + [
-        #     col for col in df.columns if pattern.match(col)
-        # ]
-
-        # Keep only those columns
-        # df = df[columns_to_keep]
+        df = pd.read_csv(file, header=[0, 1], index_col=0)
+        # print(df.head())
 
         df = df.apply(pd.to_numeric, errors="coerce")
 
         z_columns = df.columns
+        # print(z_columns)
+
         column_sums = df[z_columns].sum()
-        
+
         # 4. Multiply each column by the index ("Pixel values")
         df_multiplied = df.copy()
         for z_col in z_columns:
@@ -278,63 +282,19 @@ class RoiAnalyser:
         empty_row = pd.Series({col: pd.NA for col in df_multiplied.columns}, name="")
         df_multiplied = pd.concat([df_multiplied, pd.DataFrame([empty_row])])
 
-        # --- Add summary rows to the DataFrame ---
+        # Add summary rows to the DataFrame
         df_multiplied.loc["Column Sums"] = pd.Series(column_sums)
-        df_multiplied.loc[f"Column Sums from {start_row} onward"] = pd.Series(column_sums_from_start_row)
+        df_multiplied.loc[f"Column Sums from {start_row} onward"] = pd.Series(
+            column_sums_from_start_row
+        )
         df_multiplied.loc["Column Ratios"] = pd.Series(column_ratios)
 
-        # --- Save to file ---
-        output_file = f"{file.split('.')[0]}_analysis_new.csv"
+        # Save to file
+        output_file = f"{file.split('.')[0]}.csv"
         df_multiplied.to_csv(output_file)
         print(f"Saved as {output_file}")
 
         return
-        
-        # df_multiplied = df.copy()
-        # for col in z_columns:
-        #     df_multiplied[col + "_mult"] = df["Pixel values"] * df[col]
-
-        # Select Z columns to sum
-        z_columns_mult = [col + "_mult" for col in z_columns]
-
-        # Sum each column from row `start_row` onward
-        column_sums_from_start_row = df_multiplied.loc[start_row:, z_columns_mult].sum()
-
-        # Display the result
-        print(column_sums_from_start_row)
-
-        # Sum original columns
-        column_sums = df[z_columns].sum()
-
-        # Sum multiplied columns from row `start_row` downward
-        column_sums_from_start_row = df_multiplied.loc[
-            start_row:, [col + "_mult" for col in z_columns]
-        ].sum()
-
-        # Align the indices by renaming the multiplied columns to match the originals
-        column_sums_from_start_row.index = [
-            col.replace("_mult", "") for col in column_sums_from_start_row.index
-        ]
-
-        # Now perform the division
-        column_ratios = column_sums_from_start_row / column_sums
-
-        # Add the column sums as a new row at the bottom of the DataFrame
-        df_multiplied.loc["Column Sums"] = column_sums
-
-        # Add the column_sums_from_start_row as a new row at the bottom of the DataFrame
-        df_multiplied.loc[f"Column Sums from {start_row} onward"] = (
-            column_sums_from_start_row
-        )
-
-        # Add the column_ratios as a new row at the bottom of the DataFrame
-        df_multiplied.loc["Column Ratios"] = column_ratios
-
-        # df_multiplied.to_csv(file, index=True)
-        df_multiplied.to_csv(f"{file.split(".")[0]}_analysis.csv")
-        print(f" Saved as {file}")
-
-        # return df_multiplied
 
     def get_file_paths(self) -> dict[str, str]:
         """ """
@@ -346,11 +306,13 @@ class RoiAnalyser:
         #     rf"(?P<roi>{re.escape(self.ROI_NAME)})[-_\d]*.*?(?P<z>{re.escape(self.z)}).*?\b(?P<modality>DAPI|GFP|TRITC)"
         # )
 
+        print("Loaded files:")
         for file_name in file_names:
             if self.ROI_NAME in file_name and self.z in file_name:
                 for modality in file_paths.keys():
                     if modality.upper() in file_name:
                         file_paths[modality] = file_name
+                        print(f"{modality}: {file_name}")
 
         return file_paths
 
@@ -396,10 +358,9 @@ class RoiAnalyser:
             tritc_path=file_paths["tritc"],
         )
 
-        if self.PLOT:
-            self.plot_contours(
-                imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
-            )
+        self.plot_contours(
+            imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
+        )
 
         channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
         channel_histograms = self.build_histogram(
@@ -408,7 +369,7 @@ class RoiAnalyser:
 
         return channel_histograms
 
-    def run_analysis(self, z="") -> tuple[list[MatLike], dict, Figure | None]:
+    def run_analysis(self, z="") -> tuple[list[MatLike], dict]:
         """
         Runs analysis for the first image group (DAPI, GFP and TRITC).
         """
@@ -429,11 +390,10 @@ class RoiAnalyser:
         print("Step 2: Finding contours...")
         clusters = self.define_clusters(mask)
 
-        figure = None
-        if self.PLOT:
-            figure = self.plot_contours(
-                imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
-            )
+        # figure = None
+        figure = self.plot_contours(
+            imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
+        )
 
         print("Step 3: Building GFP and TRITC histograms for clusters...")
         channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
@@ -443,31 +403,31 @@ class RoiAnalyser:
             channels, clusters, channel_histograms
         )
 
-        return clusters, channel_histograms, figure
+        return clusters, channel_histograms
 
 
 if __name__ == "__main__":
-    DATA_DIR = "data"  # input data directory path
+    DATA_DIR = "data/#2451333014_ZProj_B IVA76"  # input data directory path
     OUTPUT_DIR = "out"  # output results directory path
     PLOT = False  # whether to show plots
     SIZE_THRESHOLD = 3000  # size threshold for filtering clusters
 
-    roi_name = "A1ROI1"
+    roi_name = "E6ROI5"
     analyser = RoiAnalyser(DATA_DIR, roi_name, OUTPUT_DIR, PLOT, SIZE_THRESHOLD)
 
     # For dapi
     # dapi_path = "A1ROI1_02_2_1Z4_Confocal DAPI_001.tif"  # change me
-    clusters, channel_histograms, figure = analyser.run_analysis(z="Z6")
+    clusters, channel_histograms = analyser.run_analysis(z="")
 
     # For other Zs
     z = "Z4"  # change me
     print("Step 4: Repeat for additional Zs...")
-    channels = analyser.repeat_for_additional_images(z, clusters, channel_histograms)
+    # channels = analyser.repeat_for_additional_images(z, clusters, channel_histograms)
 
     # Saving and exporting
     # save histograms
     print("Step 5: Saving histograms...")
-    out_files = analyser.save_histogram(channel_histograms, figure)
+    out_files = analyser.save_histogram(channel_histograms)
     print(out_files)
 
     # change these
