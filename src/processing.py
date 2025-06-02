@@ -23,6 +23,7 @@ class RoiAnalyser:
         out_dir="out",
         plot=True,
         size_threshold=3000,
+        modalities=("dapi", "tritc", "gfp"),
         opening_kernel=13,
         opening_iter=1,
         dilatation_kernel=7,
@@ -53,7 +54,7 @@ class RoiAnalyser:
         self.SIZE_THRESHOLD = size_threshold
 
         self.ROI_NAME = roi_name
-        self.MODALITIES = ("dapi", "tritc", "gfp")
+        self.MODALITIES = modalities
         self.z = ""
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
@@ -103,6 +104,9 @@ class RoiAnalyser:
                 cluster_contours.append(contour)
 
         print(f"  Found {len(cluster_contours)} clusters")
+        if len(cluster_contours) == 0:
+            print("Stopping - couldnt find any clusters.")
+            raise ValueError
 
         return cluster_contours
 
@@ -237,14 +241,14 @@ class RoiAnalyser:
             # out_files.append(output_filename)
             final_df.to_csv(output_filename, index=False)
             print(
-                f"  Successfully saved {channel_name} histogram data to {output_filename}"
+                f"  Successfully saved {channel_name} histogram data to '{output_filename}'"
             )
 
         return out_dict
 
     def apopnec_ratio(self, file: str, start_row: int):
         """
-        Runs some analysis idk.
+        Runs some analysis on the acquired clusters.
         """
 
         df = pd.read_csv(file, header=[0, 1], index_col=0)
@@ -287,17 +291,19 @@ class RoiAnalyser:
         df_multiplied.loc[f"Column Sums from {start_row} onward"] = pd.Series(
             column_sums_from_start_row
         )
-        df_multiplied.loc["Column Ratios"] = pd.Series(column_ratios)
+        df_multiplied.loc["Column Ratios"] = pd.Series(column_ratios.round(4))
 
         # Save to file
         output_file = f"{file.split('.')[0]}.csv"
         df_multiplied.to_csv(output_file)
-        print(f"Saved as {output_file}")
+        print(f"saved as '{output_file}'")
 
         return
 
     def get_file_paths(self) -> dict[str, str]:
-        """ """
+        """
+        Get file names of the DAPI, GFP and TRITC images for the specified roi name and z
+        """
 
         file_names = os.listdir(self.DATA_DIR)
         file_paths = {modality: "" for modality in self.MODALITIES}
@@ -312,7 +318,18 @@ class RoiAnalyser:
                 for modality in file_paths.keys():
                     if modality.upper() in file_name:
                         file_paths[modality] = file_name
-                        print(f"{modality}: {file_name}")
+                        print(f"  {modality}: '{file_name}'")
+
+        errors = []
+        for modality in file_paths.keys():
+            if file_paths[modality] == "":
+                errors.append(f"Couldnt find the {modality} file.")
+        
+        if len(errors) > 0:
+            print("Stopping - couldnt find some of the required files:")
+            for error in errors:
+                print("  " + error)
+            raise FileNotFoundError
 
         return file_paths
 
@@ -351,7 +368,13 @@ class RoiAnalyser:
         print(" Repeating for: ", z)
 
         self.z = z
-        file_paths = self.get_file_paths()
+        try:
+            file_paths = self.get_file_paths()
+        except FileNotFoundError as e:
+            os.removedirs(self.OUTPUT_DIR)
+            print(e)
+            return None, None
+        
         imgs = self.load_data(
             dapi_path=file_paths["dapi"],
             gfp_path=file_paths["gfp"],
@@ -375,7 +398,13 @@ class RoiAnalyser:
         """
 
         self.z = z
-        file_paths = self.get_file_paths()
+        try:
+            file_paths = self.get_file_paths()
+        except FileNotFoundError as e:
+            os.removedirs(self.OUTPUT_DIR)
+            print(e)
+            return None, None
+
         imgs = self.load_data(
             dapi_path=file_paths["dapi"],
             gfp_path=file_paths["gfp"],
@@ -387,8 +416,13 @@ class RoiAnalyser:
         print("Step 1: Preprocessing DAPI image...")
         mask = self.create_binary_mask(imgs["dapi"]["gray"])
 
-        print("Step 2: Finding contours...")
-        clusters = self.define_clusters(mask)
+        print("Step 2: Finding clusters...")
+        try:
+            clusters = self.define_clusters(mask)
+        except ValueError as e:
+            os.removedirs(self.OUTPUT_DIR)
+            print(e)
+            return None, None
 
         # figure = None
         figure = self.plot_contours(
@@ -437,10 +471,10 @@ if __name__ == "__main__":
     }
 
     # Doing some analysis
-    print("Step 6: Calculate apopnec ratio")
+    print("Step 6: Calculate apopnec ratio...")
     for name, args in params.items():
+        print(f"  for {name}")
         analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
-        print(f"|Done with {name}|\n")
 
     print("------------------")
     print("Done :)")
