@@ -7,6 +7,10 @@ import pandas as pd
 from cv2.typing import MatLike
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
+from skimage import morphology as morph
+import skimage
+from scipy import ndimage as ndi
+import tifffile
 
 
 class RoiAnalyser:
@@ -22,12 +26,13 @@ class RoiAnalyser:
         roi_name: str,
         out_dir="out",
         plot=True,
-        size_threshold=3000,
+        area_threshold=3000,
         modalities=("dapi", "tritc", "gfp"),
         opening_kernel=13,
-        opening_iter=1,
-        dilatation_kernel=7,
-        dilatation_iter=2,
+        opening_iter=2,
+        bright_opening_kernel=11,
+        validate_with_bright=False
+        # dilatation_iter=2,
     ):
         """
         Initialize the RoiAnalyser with processing parameters.
@@ -36,7 +41,7 @@ class RoiAnalyser:
             data_dir (str): Directory containing input images.
             out_dir (str, optional): Directory where results will be saved. Defaults to "out".
             plot (bool, optional): Whether to generate visualization plots. Defaults to True.
-            size_threshold (int, optional): Minimum size for clusters in pixels. Defaults to 3000.
+            area_threshold (int, optional): Minimum area for clusters in pixels. Defaults to 3000.
             opening_kernel (int, optional): Size of kernel for opening operations. Defaults to 13.
             opening_iter (int, optional): Number of iterations for opening. Defaults to 1.
             dilatation_kernel (int, optional): Size of kernel for dilation. Defaults to 7.
@@ -49,42 +54,69 @@ class RoiAnalyser:
 
         self.OPENING_KERNEL = opening_kernel
         self.OPENING_ITER = opening_iter
-        self.DILATATION_ITER = dilatation_iter
-        self.DILATATION_KERNEL = dilatation_kernel
-        self.SIZE_THRESHOLD = size_threshold
+        # self.DILATATION_ITER = dilatation_iter
+        self.BRIGHT_OPENING_KERNEL = bright_opening_kernel
+        self.AREA_THRESHOLD = area_threshold
 
         self.ROI_NAME = roi_name
         self.MODALITIES = modalities
+        
+        # doesnt really work 
+        if validate_with_bright:
+            self.MODALITIES.append("bright")
+            print(self.MODALITIES)
+        
         self.z = ""
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
-    def create_binary_mask(self, gray: MatLike) -> MatLike:
+    def create_binary_mask(self, gray: MatLike, bright=False) -> MatLike:
         """
         Preprocesses a grayscale image to create a binary mask for cell segmentation.
         """
 
-        # apply Otsu's thresholding
-        _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU)
+        # apply thresholding
+        plt.imshow(gray, cmap="gray")
+        plt.axis("off")
+        plt.show()
+
+        if bright:
+            thresh = skimage.filters.threshold_yen(gray)
+            mask = gray < thresh
+            # _, mask = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
+        else:
+            thresh = skimage.filters.threshold_triangle(gray)
+            mask = gray > thresh
+
+        plt.imshow(mask, cmap="gray")
+        plt.axis("off")
+        plt.show()
+
+        mask = ndi.binary_fill_holes(mask)
+        if mask is not None:
+            mask = mask.astype(np.uint8)
+        else:
+            raise ValueError("Mask is None")
 
         # apply morphological opening to remove small objects and noise
         # while preserving the shape of larger objects (cell clusters)
-        kernel = cv2.getStructuringElement(
-            shape=cv2.MORPH_ELLIPSE, ksize=(self.OPENING_KERNEL, self.OPENING_KERNEL)
-        )
+        if bright:
+            kernel = cv2.getStructuringElement(
+                shape=cv2.MORPH_ELLIPSE,
+                ksize=(self.BRIGHT_OPENING_KERNEL, self.BRIGHT_OPENING_KERNEL),
+            )
+        else:
+            kernel = cv2.getStructuringElement(
+                shape=cv2.MORPH_ELLIPSE,
+                ksize=(self.OPENING_KERNEL, self.OPENING_KERNEL),
+            )
         mask = cv2.morphologyEx(
             mask, cv2.MORPH_OPEN, kernel, iterations=self.OPENING_ITER
         )
 
-        # perform additional dilatation
-        kernel = cv2.getStructuringElement(
-            shape=cv2.MORPH_ELLIPSE,
-            ksize=(self.DILATATION_KERNEL, self.DILATATION_KERNEL),
-        )
-        mask = cv2.dilate(mask, kernel, iterations=self.DILATATION_ITER)
-
-        # plt.imshow(mask, cmap='gray')
-        # plt.axis('off')
+        plt.imshow(mask, cmap="gray")
+        plt.axis("off")
+        plt.show()
 
         return mask
 
@@ -100,7 +132,7 @@ class RoiAnalyser:
         cluster_contours: list[MatLike] = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > self.SIZE_THRESHOLD:
+            if area > self.AREA_THRESHOLD:
                 cluster_contours.append(contour)
 
         print(f"  Found {len(cluster_contours)} clusters")
@@ -110,50 +142,98 @@ class RoiAnalyser:
 
         return cluster_contours
 
+    def validate_clusters_with_brightfield(
+        self,
+        clusters: list[MatLike],
+        bright_mask: MatLike,
+        overlap_threshold: float = 0.3,
+    ) -> list[MatLike]:
+        """
+        Filter clusters based on their overlap with brightfield image.
+        """
+
+        valid_clusters = []
+
+        for i, cluster in enumerate(clusters):
+            # Create mask for this cluster
+            cluster_mask = np.zeros_like(bright_mask, dtype=np.uint8)
+            cv2.drawContours(cluster_mask, [cluster], 0, 255, thickness=cv2.FILLED)
+
+            # Calculate overlap with bright field
+            cluster_area = cv2.countNonZero(cluster_mask)
+            overlap_area = cv2.countNonZero(cluster_mask & bright_mask)
+            overlap_ratio = overlap_area / cluster_area if cluster_area > 0 else 0
+
+            print(f"  Cluster {i + 1}: {overlap_ratio:.2f} overlap with bright field")
+
+            if overlap_ratio >= overlap_threshold:
+                valid_clusters.append(cluster)
+            else:
+                print(f"    -> Rejected (below {overlap_threshold:.2f} threshold)")
+
+        print(
+            f"  Kept {len(valid_clusters)}/{len(clusters)} clusters after bright field validation"
+        )
+        return valid_clusters
+
     def plot_contours(
-        self, dapi: MatLike, gfp: MatLike, tritc: MatLike, contours: list[MatLike]
+        self, imgs: dict[str, dict[str, MatLike]], contours: list[MatLike]
     ) -> Figure:
         """
-        Plots found contours on all 3 images.
+        Plots found contours on all images in the imgs dictionary.
         """
 
-        # draw contour on all three images
+        img_copies = {}
+        for key, img_data in imgs.items():
+            if "img" in img_data:
+                img_copies[key] = img_data["img"].copy()
+
         for i, contour in enumerate(contours):
             colour = (0, 255, 0)
-            cv2.drawContours(dapi, contours, i, colour, 3)
-            cv2.drawContours(gfp, contours, i, colour, 3)
-            cv2.drawContours(tritc, contours, i, colour, 3)
+             
+            # draw contours on all images
+            for img in img_copies.values():
+                cv2.drawContours(img, contours, i, colour, 3)
 
+            # add labels
             colour = (0, 255, 255)
             font = cv2.FONT_HERSHEY_SIMPLEX
             text = str(i + 1)
             coords = list(contour[0][0])
-            if coords[0] == 0:
+
+            # adjust text position to avoid edges
+            edge_boundary = 60
+            first_img = next(
+                iter(img_copies.values())
+            )
+
+            if coords[0] - edge_boundary <= 0:
                 coords[0] += 100
-            elif coords[0] >= dapi.shape[0] - 1:
+            elif coords[0] + edge_boundary >= first_img.shape[1] - 1:
                 coords[0] -= 100
-            
-            if coords[1] == 0:
+
+            if coords[1] - edge_boundary <= 0:
                 coords[1] += 100
-            elif coords[1] >= dapi.shape[1] - 1:
+            elif coords[1] + edge_boundary >= first_img.shape[0] - 1:
                 coords[1] -= 100
 
-            cv2.putText(dapi, text, coords, font, 5, colour, 10, cv2.LINE_AA)
-            cv2.putText(gfp, text, coords, font, 5, colour, 10, cv2.LINE_AA)
-            cv2.putText(tritc, text, coords, font, 5, colour, 10, cv2.LINE_AA)
+            # add text to all images
+            for img in img_copies.values():
+                cv2.putText(img, text, coords, font, 5, colour, 10, cv2.LINE_AA)
 
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 10))
-        ax1.imshow(cv2.cvtColor(dapi, cv2.COLOR_BGR2RGB))
-        ax1.set_title("DAPI")
-        ax1.axis("off")
+        # create subplot
+        num_images = len(img_copies)
+        fig, axes = plt.subplots(1, num_images, figsize=(7 * num_images, 10))
 
-        ax2.imshow(cv2.cvtColor(gfp, cv2.COLOR_BGR2RGB))
-        ax2.set_title("GFP")
-        ax2.axis("off")
+        # when there is only one image
+        if num_images == 1:
+            axes = [axes]
 
-        ax3.imshow(cv2.cvtColor(tritc, cv2.COLOR_BGR2RGB))
-        ax3.set_title("TRITC")
-        ax3.axis("off")
+        # plot each image
+        for idx, (key, img) in enumerate(img_copies.items()):
+            axes[idx].imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            axes[idx].set_title(key.upper())
+            axes[idx].axis("off")
 
         plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
 
@@ -166,6 +246,7 @@ class RoiAnalyser:
             fig.savefig(os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}.png"))
         else:
             fig.savefig(os.path.join(self.OUTPUT_DIR, f"{self.ROI_NAME}_{self.z}.png"))
+
         return fig
 
     def build_histogram(
@@ -183,7 +264,7 @@ class RoiAnalyser:
 
         # nested dictionary that stores histogram data for each channel
         # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}}}}
-        
+
         z = self.z if self.z != "" else "Default"
         for name in channel_histograms.keys():
             channel_histograms[name][z] = {}
@@ -208,9 +289,7 @@ class RoiAnalyser:
                         pixels_inside_contour, bins=bin_edges
                     )
                     column_name = f"Cluster {i + 1}"
-                    channel_histograms[channel_name][z][column_name] = (
-                        histogram_counts
-                    )
+                    channel_histograms[channel_name][z][column_name] = histogram_counts
 
         return channel_histograms
 
@@ -316,7 +395,7 @@ class RoiAnalyser:
         for file_name in file_names:
             if self.ROI_NAME in file_name and self.z in file_name:
                 for modality in file_paths.keys():
-                    if modality.upper() in file_name:
+                    if modality.upper() in file_name.upper():
                         file_paths[modality] = file_name
                         print(f"  {modality}: '{file_name}'")
 
@@ -324,7 +403,7 @@ class RoiAnalyser:
         for modality in file_paths.keys():
             if file_paths[modality] == "":
                 errors.append(f"Couldnt find the {modality} file.")
-        
+
         if len(errors) > 0:
             print("Stopping - couldnt find some of the required files:")
             for error in errors:
@@ -334,7 +413,11 @@ class RoiAnalyser:
         return file_paths
 
     def load_data(
-        self, dapi_path: str, gfp_path: str, tritc_path: str
+        self,
+        dapi_path: str,
+        gfp_path: str,
+        tritc_path: str,
+        bright_path: str | None = None,
     ) -> dict[str, dict[str, MatLike]]:
         """
         Load data from the given paths and return a dictionary of images and their grayscale versions.
@@ -356,6 +439,11 @@ class RoiAnalyser:
             "tritc": {"img": tritc, "gray": tritc_gray},
         }
 
+        if bright_path is not None:
+            bright = cv2.imread(os.path.join(self.DATA_DIR, bright_path))
+            bright_gray = cv2.cvtColor(bright, cv2.COLOR_BGR2GRAY)
+            imgs["bright"] = {"img": bright, "gray": bright_gray}
+
         return imgs
 
     def repeat_for_additional_images(
@@ -371,19 +459,19 @@ class RoiAnalyser:
         try:
             file_paths = self.get_file_paths()
         except FileNotFoundError as e:
-            os.removedirs(self.OUTPUT_DIR)
+            if len(os.listdir(self.OUTPUT_DIR)) == 0:
+                os.removedirs(self.OUTPUT_DIR)
             print(e)
             return None, None
-        
+
         imgs = self.load_data(
             dapi_path=file_paths["dapi"],
             gfp_path=file_paths["gfp"],
             tritc_path=file_paths["tritc"],
+            # bright_path=file_paths.get("bright")
         )
 
-        self.plot_contours(
-            imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
-        )
+        self.plot_contours(imgs, clusters)
 
         channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
         channel_histograms = self.build_histogram(
@@ -409,6 +497,7 @@ class RoiAnalyser:
             dapi_path=file_paths["dapi"],
             gfp_path=file_paths["gfp"],
             tritc_path=file_paths["tritc"],
+            bright_path=file_paths.get("bright"),
         )
 
         print(f"\nAnalysing: {self.ROI_NAME}, {self.z}")
@@ -420,14 +509,22 @@ class RoiAnalyser:
         try:
             clusters = self.define_clusters(mask)
         except ValueError as e:
-            os.removedirs(self.OUTPUT_DIR)
+            if len(os.listdir(self.OUTPUT_DIR)) == 0:
+                os.removedirs(self.OUTPUT_DIR)
             print(e)
             return None, None
 
-        # figure = None
-        figure = self.plot_contours(
-            imgs["dapi"]["img"], imgs["gfp"]["img"], imgs["tritc"]["img"], clusters
-        )
+        # validate clusters with brightfield
+        # doesnt really work
+        if len(clusters) > 0 and imgs.get("bright") is not None:
+            print("Step 2.5: Validating clusters with brightfield...")
+            bright_mask = self.create_binary_mask(imgs["bright"]["gray"], bright=True)
+            clusters = self.validate_clusters_with_brightfield(
+                clusters, bright_mask, overlap_threshold=0.7
+            )
+
+        # display and save an image of the found clusters
+        figure = self.plot_contours(imgs, clusters)
 
         print("Step 3: Building GFP and TRITC histograms for clusters...")
         channels = {"GFP": imgs["gfp"]["gray"], "TRITC": imgs["tritc"]["gray"]}
@@ -443,38 +540,52 @@ class RoiAnalyser:
 if __name__ == "__main__":
     DATA_DIR = "data/#2451333014_ZProj_B IVA76"  # input data directory path
     OUTPUT_DIR = "out"  # output results directory path
-    PLOT = False  # whether to show plots
-    SIZE_THRESHOLD = 3000  # size threshold for filtering clusters
+    PLOT = True  # whether to show plots
+    MODALITIES = ["dapi", "tritc", "gfp"]
 
-    roi_name = "E6ROI5"
-    analyser = RoiAnalyser(DATA_DIR, roi_name, OUTPUT_DIR, PLOT, SIZE_THRESHOLD)
+    AREA_THRESHOLD = 6000  # size threshold for filtering clusters
 
-    # For dapi
-    # dapi_path = "A1ROI1_02_2_1Z4_Confocal DAPI_001.tif"  # change me
-    clusters, channel_histograms = analyser.run_analysis(z="")
+    # img = cv2.imread(os.path.join(DATA_DIR, "E1ROI3_-2_1_1_ZProj[Bright Field-High Contrast]_001.tif"))
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # # img = 255 - img
 
-    # For other Zs
-    z = "Z4"  # change me
-    print("Step 4: Repeat for additional Zs...")
-    # channels = analyser.repeat_for_additional_images(z, clusters, channel_histograms)
+    # # img = tifffile.imread(os.path.join(DATA_DIR, "E1ROI2_-2_1_1_ZProj[Bright Field-High Contrast]_001.tif"))
+    # print(img.shape, img.dtype)
+    # plt.imshow(img, cmap="gray")
+    # plt.axis('off')
+    # plt.show()
 
-    # Saving and exporting
-    # save histograms
-    print("Step 5: Saving histograms...")
-    out_files = analyser.save_histogram(channel_histograms)
-    print(out_files)
+    # RoiAnalyser(DATA_DIR, "roi_name", OUTPUT_DIR, PLOT, SIZE_THRESHOLD, MODALITIES).create_binary_mask(img, True)
 
-    # change these
-    params = {
-        "GFP": {"file": out_files["GFP"], "start_row": 72},
-        "TRITC": {"file": out_files["TRITC"], "start_row": 72},
-    }
+    # exit()
 
-    # Doing some analysis
-    print("Step 6: Calculate apopnec ratio...")
-    for name, args in params.items():
-        print(f"  for {name}")
-        analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
+    roi_name = "E1ROI3"  # change me
+    analyser = RoiAnalyser(
+        DATA_DIR,
+        roi_name,
+        OUTPUT_DIR,
+        PLOT,
+        AREA_THRESHOLD,
+        MODALITIES,
+    )
+
+    z = ""  # set to the required Z or leave empty ""
+    clusters, channel_histograms = analyser.run_analysis(z)
+
+    # # save histograms
+    # print("Step 5: Saving histograms")
+    # out_files = analyser.save_histogram(channel_histograms)
+
+    # # change the `start_row`
+    # params = {
+    #     "GFP": {"file": out_files["GFP"], "start_row": 72},
+    #     "TRITC": {"file": out_files["TRITC"], "start_row": 72},
+    # }
+
+    # print("Step 6: Calculate apopnec ratio...")
+    # for name, args in params.items():
+    #     print(f"  For {name}", end=", ")
+    #     analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
 
     print("------------------")
     print("Done :)")
