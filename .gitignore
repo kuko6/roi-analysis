@@ -4,6 +4,8 @@ data/
 out/
 playground/
 
+AGENTS.md
+
 # Python-generated files
 __pycache__/
 *.py[oc]

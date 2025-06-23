@@ -325,7 +325,7 @@ class RoiAnalyser:
         # nested dictionary that stores histogram data for each channel
         # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}}}}
 
-        z = self.z if self.z != "" else "Default"
+        z = self.z if self.z != "" else " "
         for name in channel_histograms.keys():
             channel_histograms[name][z] = {}
 
@@ -732,28 +732,28 @@ if __name__ == "__main__":
         DATA_DIR,
         roi_name,
         OUTPUT_DIR,
-        PLOT,
-        AREA_THRESHOLD,
-        MODALITIES,
+        plot=PLOT,
+        area_threshold=AREA_THRESHOLD,
+        modalities=MODALITIES,
     )
 
     z = ""  # set to the required Z or leave empty ""
     clusters, channel_histograms = analyser.run_analysis(z)
 
     # # save histograms
-    # print("Step 5: Saving histograms")
-    # out_files = analyser.save_histogram(channel_histograms)
+    print("Step 5: Saving histograms")
+    out_files = analyser.save_histogram(channel_histograms)
 
-    # # change the `start_row`
-    # params = {
-    #     "GFP": {"file": out_files["GFP"], "start_row": 72},
-    #     "TRITC": {"file": out_files["TRITC"], "start_row": 72},
-    # }
+    # change the `start_row`
+    params = {
+        "GFP": {"file": out_files["GFP"], "start_row": 72},
+        "TRITC": {"file": out_files["TRITC"], "start_row": 72},
+    }
 
-    # print("Step 6: Calculate apopnec ratio...")
-    # for name, args in params.items():
-    #     print(f"  For {name}", end=", ")
-    #     analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
+    print("Step 6: Calculate apopnec ratio...")
+    for name, args in params.items():
+        print(f"  For {name}", end=", ")
+        analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
 
     print("------------------")
     print("Done :)")
