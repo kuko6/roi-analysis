@@ -40,7 +40,7 @@ Issues = "https://github.com/kuko6/roi-analyser/issues"
 packages = ["roi_analyser"]
 
 # Optional: Development dependencies
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
     "notebook>=7.4.0",
