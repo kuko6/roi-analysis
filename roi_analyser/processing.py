@@ -15,7 +15,7 @@ from scipy import ndimage as ndi
 
 class RoiAnalyser:
     """
-    This class provides functionality for cell cluster segmentation, contour detection,
+    Provides functionality for cell cluster segmentation, contour detection,
     and histogram analysis of microscopy images, specifically DAPI, GFP,
     and TRITC channels.
     """
@@ -32,10 +32,9 @@ class RoiAnalyser:
         bright_opening_kernel=11,
         thresholding_method="yen",
         validate_with_bright=False,
-        plot_bright=False,
         plot=True,
+        plot_bright=False,
         verbose=False,
-        # dilatation_iter=2,
     ):
         """
         Initialize the RoiAnalyser with processing parameters.
@@ -44,7 +43,6 @@ class RoiAnalyser:
             data_dir (str): Directory containing input images.
             roi_name (str): Name identifier for the region of interest.
             out_dir (str, optional): Directory where results will be saved. Defaults to "out".
-            plot (bool, optional): Whether to generate visualization plots. Defaults to True.
             modalities (tuple, optional): Image modalities to process. Defaults to ("dapi", "tritc", "gfp").
             area_threshold (int, optional): Minimum area for clusters in pixels. Defaults to 3000.
             opening_kernel (int, optional): Size of kernel for opening operations. Defaults to 13.
@@ -52,6 +50,7 @@ class RoiAnalyser:
             bright_opening_kernel (int, optional): Size of kernel for bright field opening. Defaults to 11.
             thresholding_method (str, optional): Method for thresholding ("triangle", "otsu", "yen"). Defaults to "triangle".
             validate_with_bright (bool, optional): Whether to validate clusters using bright field. Defaults to False.
+            plot (bool, optional): Whether to generate visualization plots. Defaults to True.
             plot_bright (bool, optional): Whether to plot bright field images. Defaults to False.
             verbose (bool, optional): Whether to enable verbose output. Defaults to False.
         """
@@ -62,7 +61,6 @@ class RoiAnalyser:
 
         self.OPENING_KERNEL = opening_kernel
         self.OPENING_ITER = opening_iter
-        # self.DILATATION_ITER = dilatation_iter
         self.BRIGHT_OPENING_KERNEL = bright_opening_kernel
         self.area_threshold = area_threshold
 
@@ -73,6 +71,9 @@ class RoiAnalyser:
         self.thresholding_method = thresholding_method
 
         self.verbose = verbose
+
+        if validate_with_bright:
+            raise NotImplementedError("Bright field validation is not implemented.")
 
         # doesnt really work
         if validate_with_bright or plot_bright:
@@ -85,18 +86,13 @@ class RoiAnalyser:
 
     def create_binary_mask(self, gray: MatLike, bright=False) -> MatLike:
         """
-        Preprocesses a grayscale image to create a binary mask for cell segmentation.
+        Creates a binary mask for cell segmentation.
         """
-
-        # plt.imshow(gray, cmap="gray")
-        # plt.axis("off")
-        # plt.show()
 
         # apply thresholding
         if bright:
             thresh = skimage.filters.threshold_yen(gray)
             mask = gray < thresh
-            # _, mask = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
         else:
             if self.thresholding_method == "triangle":
                 thresh_triangle = skimage.filters.threshold_triangle(gray)
@@ -104,16 +100,14 @@ class RoiAnalyser:
                     thresh = skimage.filters.threshold_otsu(gray)
                 else:
                     thresh = thresh_triangle
-                # thresh = skimage.filters.threshold_triangle(gray)
             elif self.thresholding_method == "otsu":
                 thresh = skimage.filters.threshold_otsu(gray)
             elif self.thresholding_method == "yen":
                 thresh = skimage.filters.threshold_yen(gray)
+            else:
+                # default fallback
+                thresh = skimage.filters.threshold_yen(gray)
             mask = gray > thresh
-
-        # plt.imshow(mask, cmap="gray")
-        # plt.axis("off")
-        # plt.show()
 
         mask = ndi.binary_fill_holes(mask)
         if mask is not None:
@@ -122,7 +116,6 @@ class RoiAnalyser:
             raise ValueError("Mask is None")
 
         # apply morphological opening to remove small objects and noise
-        # while preserving the shape of larger objects (cell clusters)
         if bright:
             kernel = cv2.getStructuringElement(
                 shape=cv2.MORPH_ELLIPSE,
@@ -163,7 +156,7 @@ class RoiAnalyser:
         print(f"  Found {len(cluster_contours)} clusters")
         if len(cluster_contours) == 0:
             print("Stopping - couldnt find any clusters.")
-            raise ValueError
+            raise ValueError("No clusters found")
 
         return cluster_contours
 
@@ -174,19 +167,21 @@ class RoiAnalyser:
         overlap_threshold: float = 0.3,
     ) -> list[MatLike]:
         """
+        Doesn't work well!!!
+
         Filter clusters based on their overlap with brightfield image.
         """
 
         valid_clusters = []
 
         for i, cluster in enumerate(clusters):
-            # Create mask for this cluster
+            # create mask for this cluster
             cluster_mask = np.zeros_like(bright_mask, dtype=np.uint8)
-            cv2.drawContours(cluster_mask, [cluster], 0, 255, thickness=cv2.FILLED)
+            cv2.drawContours(cluster_mask, [cluster], 0, (255,), thickness=cv2.FILLED)
 
-            # Calculate overlap with bright field
+            # calculate overlap with bright field
             cluster_area = cv2.countNonZero(cluster_mask)
-            overlap_area = cv2.countNonZero(cluster_mask & bright_mask)
+            overlap_area = cv2.countNonZero(cv2.bitwise_and(cluster_mask, bright_mask))
             overlap_ratio = overlap_area / cluster_area if cluster_area > 0 else 0
 
             print(f"  Cluster {i + 1}: {overlap_ratio:.2f} overlap with bright field")
@@ -205,7 +200,7 @@ class RoiAnalyser:
         self, imgs: dict[str, dict[str, MatLike]], contours: list[MatLike]
     ) -> Figure:
         """
-        Plots found contours on all images in the imgs dictionary.
+        Plots found contours (clusters) on all images.
         """
 
         img_copies = {}
@@ -275,28 +270,19 @@ class RoiAnalyser:
     def plot_original_images(self, imgs: dict[str, dict[str, MatLike]]) -> Figure:
         """
         Plot the original DAPI and brightfield images (if available) for visual inspection.
-
-        Args:
-            imgs: Dictionary containing image data with 'dapi' and optionally 'bright' keys
-
-        Returns:
-            Figure object
         """
 
-        # Determine which images to plot
         images_to_plot = ["dapi"]
         if "bright" in imgs:
             images_to_plot.append("bright")
 
-        # Create subplots
         num_images = len(images_to_plot)
         fig, axes = plt.subplots(1, num_images)
 
-        # Handle case where there's only one image (axes won't be a list)
         if num_images == 1:
             axes = [axes]
 
-        # Plot each image
+        # plot each image
         for idx, img_key in enumerate(images_to_plot):
             if img_key in imgs:
                 img = imgs[img_key]["img"]
@@ -323,7 +309,7 @@ class RoiAnalyser:
         bin_edges = np.arange(num_bins + 1)
 
         # nested dictionary that stores histogram data for each channel
-        # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}}}}
+        # {'ChannelName': {'Z4' : {'Cluster_0': counts_array, 'Cluster_1': counts_array, ...}, {'Z6': {'Cluster_0': counts_array, ...}}}}
 
         z = self.z if self.z != "" else " "
         for name in channel_histograms.keys():
@@ -355,7 +341,7 @@ class RoiAnalyser:
 
     def save_histogram(self, channel_histograms: dict) -> dict:
         """
-        Saves computed histograms and *optionaly* figures.
+        Saves computed histograms and figures (optional).
         Returns dict with histograms mapped to channels.
         """
 
@@ -385,17 +371,18 @@ class RoiAnalyser:
 
         return out_dict
 
-    def remove_clusters_from_csv(self, clusters: int | list[int]):
+    def remove_clusters_from_csv(
+        self, clusters: int | list[int], channels: list[str] = ["GFP", "TRITC"]
+    ):
         """
         Delete a specific cluster from all channel CSV files and all z-levels.
 
         Args:
-            cluster_name: Name of the cluster to delete (e.g., 'Cluster 1')
+            clusters (int | list[int]): Cluster number(s) to delete (e.g., 1 or [1, 2, 3])
+            channels (list[str]): Channel names to process (default: ["GFP", "TRITC"])
         """
 
-        channels = ["GFP", "TRITC"]
-
-        if type(clusters) is int:
+        if isinstance(clusters, int):
             clusters = [clusters]
 
         for cluster in clusters:
@@ -411,10 +398,10 @@ class RoiAnalyser:
                     continue
 
                 try:
-                    # Read the CSV with multi-level headers
+                    # read the CSV with multi-level headers
                     df = pd.read_csv(csv_file, header=[0, 1], index_col=0)
 
-                    # Find all columns that match the cluster name (across all z-levels)
+                    # find all columns that match the cluster name (across all z-levels)
                     columns_to_delete = [
                         col for col in df.columns if col[1] == cluster_name
                     ]
@@ -423,10 +410,10 @@ class RoiAnalyser:
                         print(f"Couldn't find '{cluster_name}' in {channel} csv")
                         continue
 
-                    # Drop all matching columns
+                    # drop all matching columns
                     df = df.drop(columns=columns_to_delete)
 
-                    # Save the modified DataFrame back to CSV
+                    # save the modified DataFrame back to CSV
                     df.to_csv(csv_file)
 
                     print(f"Removed '{cluster_name}' from {channel} csv")
@@ -436,7 +423,7 @@ class RoiAnalyser:
 
     def remove_clusters(
         self, clusters: list[MatLike], clusters_to_remove: int | list[int]
-    ) -> list[MatLike]:
+    ) -> tuple[list[MatLike], dict]:
         """
         Remove specified clusters from the cluster list.
 
@@ -451,18 +438,19 @@ class RoiAnalyser:
         if isinstance(clusters_to_remove, int):
             clusters_to_remove = [clusters_to_remove]
 
-        # Convert to 0-indexed and sort in descending order to avoid index shifting
+        # convert to 0-indexed and sort in descending order to avoid index shifting
         indices_to_remove = sorted([c - 1 for c in clusters_to_remove], reverse=True)
 
         filtered_clusters = clusters.copy()
 
+        # remove cluster by index
         for idx in indices_to_remove:
             if 0 <= idx < len(filtered_clusters):
                 filtered_clusters.pop(idx)
                 print(f"Removed 'Cluster {idx + 1}'")
             else:
                 print(f"Couldn't find 'Cluster {idx + 1}'")
-        
+
         self.plot_contours(self.imgs, filtered_clusters)
 
         print("Rebuilding histograms...")
@@ -484,53 +472,50 @@ class RoiAnalyser:
         """
 
         df = pd.read_csv(file, header=[0, 1], index_col=0)
-        # print(df.head())
-
         df = df.apply(pd.to_numeric, errors="coerce")
-
         z_columns = df.columns
-        # print(z_columns)
 
         column_sums = df[z_columns].sum()
 
-        # 4. Multiply each column by the index ("Pixel values")
+        # multiply each column by the index ("Pixel values")
         df_multiplied = df.copy()
         for z_col in z_columns:
-            new_col = (z_col[0], z_col[1] + "_mult")  # Add suffix to second level
+            new_col = (z_col[0], z_col[1] + "_mult")  # add suffix to second level
             df_multiplied[new_col] = df[z_col] * df.index
 
-        # Get multiplied columns
+        # get multiplied columns
         z_columns_mult = [(z[0], z[1] + "_mult") for z in z_columns]
 
-        # Sum original and multiplied from start_row onward
+        # sum original and multiplied from start_row onward
         column_sums = df[z_columns].sum()
         column_sums_from_start_row = df_multiplied.loc[start_row:, z_columns_mult].sum()
 
-        # Rename the multiplied sum index to match the originals (remove "_mult")
-        column_sums_from_start_row.index = pd.MultiIndex.from_tuples([
-            (z[0], z[1].replace("_mult", "")) for z in column_sums_from_start_row.index
-        ])
+        # rename the multiplied sum index to match the originals (remove "_mult")
+        column_sums_from_start_row.index = pd.MultiIndex.from_tuples(
+            [
+                (z[0], z[1].replace("_mult", ""))
+                for z in column_sums_from_start_row.index
+            ]
+        )
 
-        # Align indices to perform division
+        # align indices to perform division
         column_ratios = column_sums_from_start_row / column_sums
 
-        # Step 2: Append the empty row first
+        # append the empty row first
         empty_row = pd.Series({col: pd.NA for col in df_multiplied.columns}, name="")
         df_multiplied = pd.concat([df_multiplied, pd.DataFrame([empty_row])])
 
-        # Add summary rows to the DataFrame
+        # add summary rows to the DataFrame
         df_multiplied.loc["Column Sums"] = pd.Series(column_sums)
         df_multiplied.loc[f"Column Sums from {start_row} onward"] = pd.Series(
             column_sums_from_start_row
         )
         df_multiplied.loc["Column Ratios"] = pd.Series(column_ratios.round(4))
 
-        # Save to file
+        # save to file
         output_file = f"{file.split('.')[0]}.csv"
         df_multiplied.to_csv(output_file)
         print(f"saved as '{output_file}'")
-
-        return
 
     def get_file_paths(self) -> dict[str, str]:
         """
@@ -601,7 +586,7 @@ class RoiAnalyser:
 
     def repeat_for_additional_images(
         self, z: str, clusters: list[MatLike], channel_histograms: dict
-    ) -> dict:
+    ) -> dict | tuple[None, None]:
         """
         Repeat the analysis for additional images.
         """
@@ -633,7 +618,7 @@ class RoiAnalyser:
 
         return channel_histograms
 
-    def run_analysis(self, z="") -> tuple[list[MatLike], dict]:
+    def run_analysis(self, z="") -> tuple[list[MatLike], dict] | tuple[None, None]:
         """
         Runs analysis for the first image group (DAPI, GFP and TRITC).
         """
@@ -715,19 +700,24 @@ if __name__ == "__main__":
 
     # img = cv2.imread(os.path.join(DATA_DIR, "E1ROI3_-2_1_1_ZProj[Bright Field-High Contrast]_001.tif"))
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # print(img.shape, img.dtype)
     # # img = 255 - img
 
-    # # img = tifffile.imread(os.path.join(DATA_DIR, "E1ROI2_-2_1_1_ZProj[Bright Field-High Contrast]_001.tif"))
-    # print(img.shape, img.dtype)
-    # plt.imshow(img, cmap="gray")
-    # plt.axis('off')
+    # import tifffile
+    # img2 = tifffile.imread(os.path.join(DATA_DIR, "E1ROI3_-2_1_1_ZProj[Bright Field-High Contrast]_001.tif"))
+    # print(img2.shape, img2.dtype)
+
+    # fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    # axs[0].imshow(img, cmap="gray")
+    # axs[0].axis('off')
+    # axs[1].imshow(img2, cmap="gray")
+    # axs[1].axis('off')
     # plt.show()
 
     # RoiAnalyser(DATA_DIR, "roi_name", OUTPUT_DIR, PLOT, SIZE_THRESHOLD, MODALITIES).create_binary_mask(img, True)
 
-    # exit()
-
     roi_name = "E1ROI3"  # change me
+
     analyser = RoiAnalyser(
         DATA_DIR,
         roi_name,
@@ -742,6 +732,10 @@ if __name__ == "__main__":
 
     # # save histograms
     print("Step 5: Saving histograms")
+
+    if channel_histograms is None:
+        exit()
+
     out_files = analyser.save_histogram(channel_histograms)
 
     # change the `start_row`
