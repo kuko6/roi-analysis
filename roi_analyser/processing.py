@@ -131,9 +131,14 @@ class RoiAnalyser:
         )
 
         # if self.verbose:
-        plt.imshow(mask, cmap="gray")
-        plt.axis("off")
-        plt.title("Generated mask")
+        fig, axs = plt.subplots(1, 2, figsize=(5, 5))
+        axs[0].imshow(gray, cmap="gray")
+        axs[0].set_title("DAPI", fontsize=8)
+        axs[0].axis("off")
+        axs[1].imshow(mask, cmap="gray")
+        axs[1].set_title("Generated mask", fontsize=8)
+        axs[1].axis("off")
+        plt.tight_layout()
         plt.show()
 
         return mask
