@@ -1,8 +1,9 @@
 # Roi Analysis
-Simple library for analysing DAPI microscopy images.
+Notebook for analysing DAPI microscopy images.
+
+Code for the library is in the [library](https://github.com/kuko6/roi-analysis/tree/library) branch.
 
 ## Prerequisites
-
 Python 3.12
 Conda or pip with a virtual environment tool.
 
@@ -11,19 +12,4 @@ Create and activate Conda environment:
 ```bash
 conda env create -f environment.yml
 conda activate roi-analysis
-```
-
-## Installation
-You can install the library from github:
-
-```bash
-pip install git+https://github.com/kuko6/roi-analyser.git
-```
-
-or build it locally:
-
-```bash
-git clone https://github.com/kuko6/roi-analyser.git
-cd roi-analyser
-pip install -e .
 ```
