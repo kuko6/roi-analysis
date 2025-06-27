@@ -1,15 +1,30 @@
-# Roi Analysis
-Notebook for analysing DAPI microscopy images.
+# ROI Analysis
 
-Code for the library is in the [library](https://github.com/kuko6/roi-analysis/tree/library) branch.
+A jupyter notebook for analyzing DAPI microscopy images.
+
+## Project Structure
+
+- **Notebooks**: Main analysis workflows.
+- **Library**: Core image processing code ([see library branch](https://github.com/kuko6/roi-analysis/tree/library)).
 
 ## Prerequisites
-Python 3.12
-Conda or pip with a virtual environment tool.
+
+- Conda (recommended) or pip with virtual environment support
+- Python 3.12
 
 ## Setup
-Create and activate Conda environment:
-```bash
-conda env create -f environment.yml
-conda activate roi-analysis
-```
+
+1. Create and activate the Conda environment:
+    ```bash
+    conda env create -f environment.yml
+    conda activate roi-analysis
+    ```
+
+2. Start Jupyter Notebook:
+    ```bash
+    jupyter notebook
+    ```
+
+## Usage
+
+Open the main notebook and follow the instructions to analyze your images.
