@@ -27,9 +27,6 @@ Homepage = "https://github.com/kuko6/roi-analyser"
 Repository = "https://github.com/kuko6/roi-analyser.git"
 Issues = "https://github.com/kuko6/roi-analyser/issues"
 
-[tool.hatchling.build.targets.wheel]
-packages = ["roi_analyser"]
-
 dependencies = [
     "opencv-python>=4.11.0.86",
     "matplotlib>=3.10.1",
@@ -47,3 +44,7 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
 ]
+
+[tool.hatchling.build.targets.wheel]
+packages = ["roi_analyser"]
+
