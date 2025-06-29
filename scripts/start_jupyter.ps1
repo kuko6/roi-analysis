@@ -9,18 +9,6 @@ if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# initialize conda for PowerShell
-try {
-    $condaPath = (Get-Command conda).Source
-    $condaRoot = Split-Path (Split-Path $condaPath)
-    & "$condaRoot\shell\condabin\conda-hook.ps1"
-}
-catch {
-    Write-Host "Failed to initialize conda. Please run 'conda init powershell' and restart PowerShell."
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
 $ENV_NAME = "roi-analysis"
 $ENV_FILE = "environment.yml"
 

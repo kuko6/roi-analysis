@@ -13,14 +13,6 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM initialize conda (usually automatic on Windows)
-call conda activate base >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo Failed to initialize conda. Please run 'conda init cmd.exe' and restart your command prompt.
-    pause
-    exit /b 1
-)
-
 set ENV_NAME=roi-analysis
 set ENV_FILE=environment.yml
 
@@ -30,11 +22,6 @@ if %ERRORLEVEL% NEQ 0 (
     echo Environment '%ENV_NAME%' not found. Creating it from %ENV_FILE%...
     if exist "%ENV_FILE%" (
         conda env create -f "%ENV_FILE%"
-        if %ERRORLEVEL% NEQ 0 (
-            echo Error: Failed to create environment.
-            pause
-            exit /b 1
-        )
     ) else (
         echo Error: %ENV_FILE% not found in current directory.
         pause
@@ -54,3 +41,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM start Jupyter Notebook
 jupyter notebook
+call conda activate "%ENV_NAME%"
+if %ERRORLEVEL% NEQ 0 (
+    echo Error: Failed to start jupyter.
+    pause
+    exit /b 1
+)
+
+pause
