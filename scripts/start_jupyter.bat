@@ -47,5 +47,3 @@ if %ERRORLEVEL% NEQ 0 (
     pause
     exit /b 1
 )
-
-pause

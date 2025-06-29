@@ -1,13 +1,11 @@
 name: roi-analysis
 channels:
   - defaults
-  - https://repo.anaconda.com/pkgs/main
-  - https://repo.anaconda.com/pkgs/r
 dependencies:
   - python=3.12
+  - ipykernel
+  - notebook
   - pip
   - git
   - pip:
-    - ipykernel>=6.29.5
-    - notebook>=7.4.0
     - git+https://github.com/kuko6/roi-analyser.git@library
