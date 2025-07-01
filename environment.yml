@@ -8,4 +8,4 @@ dependencies:
   - pip
   - git
   - pip:
-    - git+https://github.com/kuko6/roi-analyser.git@library
+    - git+https://github.com/kuko6/roi-analysis.git@library
