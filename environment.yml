@@ -1,0 +1,11 @@
+name: roi-analysis
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - ipykernel
+  - notebook
+  - pip
+  - git
+  - pip:
+    - git+https://github.com/kuko6/roi-analysis.git@library
