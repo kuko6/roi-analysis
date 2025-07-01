@@ -40,9 +40,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kuko6/roi-analyser"
-Repository = "https://github.com/kuko6/roi-analyser.git"
-Issues = "https://github.com/kuko6/roi-analyser/issues"
+Homepage = "https://github.com/kuko6/roi-analysis"
+Repository = "https://github.com/kuko6/roi-analysis.git"
+Issues = "https://github.com/kuko6/roi-analysis/issues"
 
 [tool.hatchling.build.targets.wheel]
 packages = ["roi_analyser"]
