@@ -1,4 +1,4 @@
-# Roi Analysis
+# Roi Analysis - library
 Simple library for analysing DAPI microscopy images.
 
 ## Prerequisites
