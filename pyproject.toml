@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "roi-analyser"
-version = "0.2.1"
+version = "0.2.2"
 description = "A library for detecting cell clusters from DAPI microscopy images"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,4 +46,3 @@ Issues = "https://github.com/kuko6/roi-analysis/issues"
 
 [tool.hatchling.build.targets.wheel]
 packages = ["roi_analyser"]
-
