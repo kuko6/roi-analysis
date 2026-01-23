@@ -85,7 +85,7 @@ class RoiAnalyser:
 
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
 
-    def create_binary_mask(self, gray: MatLike, bright=False) -> MatLike:
+    def create_binary_mask(self, gray: MatLike, bright=False) -> tuple[MatLike, float]:
         """
         Creates a binary mask for cell segmentation.
         """
@@ -142,7 +142,7 @@ class RoiAnalyser:
             plt.tight_layout()
             plt.show()
 
-        return mask
+        return mask, thresh
 
     def define_clusters(self, mask: MatLike) -> list[MatLike]:
         """
@@ -628,7 +628,9 @@ class RoiAnalyser:
 
         return channel_histograms
 
-    def run_analysis(self, z="") -> tuple[list[MatLike], dict] | tuple[None, None]:
+    def run_analysis(
+        self, z=""
+    ) -> tuple[list[MatLike], dict, float] | tuple[None, None, None]:
         """
         Runs analysis for the first image group (DAPI, GFP and TRITC).
         """
@@ -639,7 +641,7 @@ class RoiAnalyser:
         except FileNotFoundError as e:
             os.removedirs(self.OUTPUT_DIR)
             print(e)
-            return None, None
+            return None, None, None
 
         imgs = self.load_data(
             dapi_path=file_paths["dapi"],
@@ -655,17 +657,17 @@ class RoiAnalyser:
 
         print(f"\nAnalysing: {self.ROI_NAME}, {self.z}")
 
-        print("Step 1: Preprocessing DAPI image...")
-        mask = self.create_binary_mask(self.imgs["dapi"]["gray"])
+        print("Preprocessing DAPI image...")
+        mask, thresh = self.create_binary_mask(self.imgs["dapi"]["gray"])
 
-        print("Step 2: Finding clusters...")
+        print("Finding clusters...")
         try:
             clusters = self.define_clusters(mask)
         except ValueError as e:
             if len(os.listdir(self.OUTPUT_DIR)) == 0:
                 os.removedirs(self.OUTPUT_DIR)
             print(e)
-            return None, None
+            return None, None, None
 
         # validate clusters with brightfield
         # doesnt really work
@@ -674,7 +676,7 @@ class RoiAnalyser:
             and self.imgs.get("bright") is not None
             and self.validate_with_bright
         ):
-            print("Step 2.5: Validating clusters with brightfield...")
+            print("Validating clusters with brightfield...")
             bright_mask = self.create_binary_mask(
                 self.imgs["bright"]["gray"], bright=True
             )
@@ -686,7 +688,7 @@ class RoiAnalyser:
         self.plot_contours(self.imgs, clusters)
         # figure = self.plot_contours(imgs, clusters)
 
-        print("Step 3: Building GFP and TRITC histograms for clusters...")
+        print("Building GFP and TRITC histograms for clusters...")
         channels = {
             "GFP": self.imgs["gfp"]["gray"],
             "TRITC": self.imgs["tritc"]["gray"],
@@ -697,7 +699,7 @@ class RoiAnalyser:
             channels, clusters, channel_histograms
         )
 
-        return clusters, channel_histograms
+        return clusters, channel_histograms, thresh
 
 
 if __name__ == "__main__":
@@ -738,10 +740,11 @@ if __name__ == "__main__":
     )
 
     z = ""  # set to the required Z or leave empty ""
-    clusters, channel_histograms = analyser.run_analysis(z)
+    clusters, channel_histograms, thresh = analyser.run_analysis(z)
+    print(thresh)
 
     # # save histograms
-    print("Step 5: Saving histograms")
+    print("Saving histograms")
 
     if channel_histograms is None:
         exit()
@@ -754,7 +757,7 @@ if __name__ == "__main__":
         "TRITC": {"file": out_files["TRITC"], "start_row": 72},
     }
 
-    print("Step 6: Calculate apopnec ratio...")
+    print("Calculate apopnec ratio...")
     for name, args in params.items():
         print(f"  For {name}", end=", ")
         analyser.apopnec_ratio(file=args["file"], start_row=args["start_row"])
